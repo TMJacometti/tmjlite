@@ -94,51 +94,72 @@
       "name": "Python",
       "lib": "tmjlite-lib-python",
       "prefix": "tmjlite-python",
-      "desc": "Lib pronta com o motor nativo embutido (Windows, Linux e macOS). Extraia, copie a pasta tmjlite/ para o seu projeto e importe — sem pip, sem build.",
-      "install": "extraia o zip → copie tmjlite/ para o projeto → import tmjlite",
-      "code": "import tmjlite\n\ndb = tmjlite.connect(\"app.tmjp\")\ndb.execute(\"CREATE TABLE t (id PK, name TEXT);\")\nfor row in db.query(\"SELECT * FROM t;\"):\n    print(row[\"name\"])"
+      "desc": "Instale pelo PyPI: o wheel já traz o motor nativo para macOS (Apple Silicon), Linux x64 e Windows x64 — sem build, sem configuração.",
+      "code": "import tmjlite\n\ndb = tmjlite.connect(\"app.tmjp\")\ndb.execute(\"CREATE TABLE t (id PK, name TEXT);\")\nfor row in db.query(\"SELECT * FROM t;\"):\n    print(row[\"name\"])",
+      "registry": {
+        "label": "PyPI",
+        "cmd": "pip install tmjlite",
+        "url": "https://pypi.org/project/tmjlite/"
+      }
     },
     {
       "id": "node",
       "name": "Node.js",
       "lib": "tmjlite-lib-node",
       "prefix": "tmjlite-node",
-      "desc": "Pacote npm local com o motor nativo embutido (Windows, Linux e macOS). Extraia e instale com um comando — Node 18+.",
-      "install": "npm install ./tmjlite",
-      "code": "const { connect } = require('tmjlite');\n\nconst db = connect('app.tmjp');\ndb.execute('CREATE TABLE t (id PK, name TEXT);');\nconst rows = db.query('SELECT * FROM t;');\nrows.forEach(r => console.log(r.get('name')));"
+      "desc": "Instale pelo npm: o pacote traz o motor nativo em prebuilds/ para macOS (Apple Silicon), Linux x64 e Windows x64.",
+      "code": "const { connect } = require('tmjlite');\n\nconst db = connect('app.tmjp');\ndb.execute('CREATE TABLE t (id PK, name TEXT);');\nconst rows = db.query('SELECT * FROM t;');\nrows.forEach(r => console.log(r.get('name')));",
+      "registry": {
+        "label": "npm",
+        "cmd": "npm install tmjlite",
+        "url": "https://www.npmjs.com/package/tmjlite"
+      }
     },
     {
       "id": "csharp",
       "name": "C#",
       "lib": "tmjlite-lib-csharp",
       "prefix": "tmjlite-csharp",
-      "desc": "Um único arquivo TMJLite.dll com o motor nativo embutido (Windows, Linux e macOS). Copie para o projeto e referencie no .csproj. .NET 8+.",
-      "install": "<Reference Include=\"TMJLite\"><HintPath>libs\\TMJLite.dll</HintPath></Reference>",
-      "code": "using TMJPlatform;\n\nusing var db = TMJLite.Connect(\"app.tmjp\");\ndb.Execute(\"CREATE TABLE t (id PK, name TEXT);\");\nforeach (var row in db.Query(\"SELECT * FROM t;\"))\n    Console.WriteLine(row[\"name\"]);"
+      "desc": "Instale pelo NuGet: um único TMJLite.dll com o motor nativo embutido para Windows, Linux e macOS (.NET 8+).",
+      "code": "using TMJPlatform;\n\nusing var db = TMJLite.Connect(\"app.tmjp\");\ndb.Execute(\"CREATE TABLE t (id PK, name TEXT);\");\nforeach (var row in db.Query(\"SELECT * FROM t;\"))\n    Console.WriteLine(row[\"name\"]);",
+      "registry": {
+        "label": "NuGet",
+        "cmd": "dotnet add package TMJLite",
+        "url": "https://www.nuget.org/packages/TMJLite"
+      }
     },
     {
       "id": "java",
       "name": "Java",
       "lib": "tmjlite-lib-java",
       "prefix": "tmjlite-java",
-      "desc": "Um único JAR com driver, JNA e motor nativo embutidos (Windows, Linux e macOS). Java 11+ — só adicionar ao classpath.",
-      "install": "java -cp tmjlite-<versão>.jar:. MeuApp",
-      "code": "try (Connection db = TMJLite.connect(\"app.tmjp\")) {\n    db.execute(\"CREATE TABLE t (id PK, name TEXT);\");\n    QueryResult r = db.query(\"SELECT * FROM t;\");\n    for (Row row : r) System.out.println(row.getString(\"name\"));\n}"
+      "desc": "Instale pelo Maven Central: o jar traz as nativas nos caminhos do JNA — funciona em Windows, Linux e macOS (Java 11+).",
+      "code": "try (Connection db = TMJLite.connect(\"app.tmjp\")) {\n    db.execute(\"CREATE TABLE t (id PK, name TEXT);\");\n    QueryResult r = db.query(\"SELECT * FROM t;\");\n    for (Row row : r) System.out.println(row.getString(\"name\"));\n}",
+      "registry": {
+        "label": "Maven Central",
+        "cmd": "<dependency>\n  <groupId>io.github.tmjacometti</groupId>\n  <artifactId>tmjlite</artifactId>\n  <version>{version}</version>\n</dependency>",
+        "url": "https://central.sonatype.com/artifact/io.github.tmjacometti/tmjlite"
+      }
     },
     {
       "id": "go",
       "name": "Go",
       "lib": "tmjlite-lib-go",
       "prefix": "tmjlite-go",
-      "desc": "Módulo Go com header e libs nativas embutidos — go build direto, sem CGO_LDFLAGS. Requer cgo (MinGW no Windows).",
-      "install": "replace github.com/TMJPlatform/tmjlite-go => ./tmjlite-go",
-      "code": "import tmjlite \"github.com/TMJPlatform/tmjlite-go\"\n\ndb, _ := tmjlite.Open(\"app.tmjp\")\ndefer db.Close()\ndb.Execute(\"CREATE TABLE t (id PK, name TEXT);\")\nresult, _ := db.Query(\"SELECT * FROM t;\")"
+      "desc": "Módulo Go no repo público, com header e nativas dentro (cgo). Ou baixe o zip com demo compilada por OS.",
+      "code": "import tmjlite \"github.com/TMJPlatform/tmjlite-go\"\n\ndb, _ := tmjlite.Open(\"app.tmjp\")\ndefer db.Close()\ndb.Execute(\"CREATE TABLE t (id PK, name TEXT);\")\nresult, _ := db.Query(\"SELECT * FROM t;\")",
+      "registry": {
+        "label": "GitHub (go get)",
+        "cmd": "go get github.com/TMJacometti/tmjlite@v{version}",
+        "url": "https://github.com/TMJacometti/tmjlite",
+        "note": "cgo: o módulo já traz include/ e lib/ com as nativas (macOS arm64, Linux x64, Windows x64)."
+      }
     },
     {
       "id": "rust",
       "name": "Rust",
       "prefix": "tmjlite-rust",
-      "desc": "Integração via SDK comercial TMJ (o driver Rust linka o engine em código-fonte). Demo compilada disponível por plataforma.",
+      "desc": "O driver Rust linka o engine em fonte e é distribuído como SDK sob licença. Aqui você baixa a demo compilada por OS para experimentar a API.",
       "code": "use tmjlite_rs::Connection;\n\nlet mut db = Connection::open(\"app.tmjp\")?;\ndb.execute(\"CREATE TABLE t (id PK, name TEXT);\")?;\nlet rows = db.query(\"SELECT * FROM t;\")?;"
     }
   ]
