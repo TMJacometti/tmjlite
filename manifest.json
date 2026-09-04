@@ -46,8 +46,8 @@
   "studio": {
     "version": "0.2.8",
     "prefix": "tmjstudio",
-    "desc": "IDE nativa para TMJLite — explorer, SQL, mock data, índices, TRUNCATE/DROP e export. Abre e cria bancos SQLite, com auto-reload de migrations externas e bancos recentes.",
-    "note": "macOS: o app não é notarizado pela Apple — se aparecer “TMJStudio está danificado”, rode no Terminal: xattr -cr /Applications/TMJStudio.app e abra de novo.",
+    "desc": "IDE nativa para TMJLite: explorer, editor SQL com abas e histórico, grid editável paginado, EXPLAIN, mock data, índices, export CSV/JSON. Painel git-native: branches, commit, log e merge com dry-run e conflitos lado a lado. Abre SQLite e importa CSV/SQLite para .tmjp.",
+    "note": "macOS: assinado com Developer ID e notarizado pela Apple — abre sem avisos.",
     "files": {
       "linux-x64": [
         {
