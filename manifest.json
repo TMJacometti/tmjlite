@@ -1,0 +1,145 @@
+{
+  "version": "0.2.8",
+  "codename": "capivara",
+  "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/v0.2.8",
+  "platforms": [
+    {
+      "id": "macos-arm64",
+      "label": "macOS Apple Silicon",
+      "icon": "🍎",
+      "tags": [
+        "arm64",
+        "M1/M2/M3/M4"
+      ],
+      "recommendedOn": [
+        "macos-arm64"
+      ]
+    },
+    {
+      "id": "linux-x64",
+      "label": "Linux x64",
+      "icon": "🐧",
+      "tags": [
+        "glibc",
+        "x86_64"
+      ],
+      "recommendedOn": [
+        "linux-x64"
+      ]
+    },
+    {
+      "id": "windows-x64",
+      "label": "Windows x64",
+      "icon": "🪟",
+      "tags": [
+        "msvc",
+        "x86_64"
+      ],
+      "recommendedOn": [
+        "windows-x64"
+      ]
+    }
+  ],
+  "cli": {
+    "prefix": "tmjlite-cli"
+  },
+  "studio": {
+    "version": "0.2.7",
+    "prefix": "tmjstudio",
+    "desc": "IDE nativa para TMJLite — explorer, SQL, mock data, índices, TRUNCATE/DROP e export. Abre e cria bancos SQLite, com auto-reload de migrations externas e bancos recentes.",
+    "note": "macOS: o app não é notarizado pela Apple — se aparecer “TMJStudio está danificado”, rode no Terminal: xattr -cr /Applications/TMJStudio.app e abra de novo.",
+    "files": {
+      "linux-x64": [
+        {
+          "file": "TMJStudio-0.2.7-1.x86_64.rpm",
+          "label": "↓ .rpm"
+        },
+        {
+          "file": "TMJStudio_0.2.7_amd64.AppImage",
+          "label": "↓ AppImage"
+        },
+        {
+          "file": "TMJStudio_0.2.7_amd64.deb",
+          "label": "↓ .deb"
+        }
+      ],
+      "macos-arm64": [
+        {
+          "file": "TMJStudio_0.2.7_aarch64.dmg",
+          "label": "↓ .dmg (Apple Silicon)"
+        }
+      ],
+      "windows-x64": [
+        {
+          "file": "TMJStudio_0.2.7_x64-setup.exe",
+          "label": "↓ Setup .exe"
+        },
+        {
+          "file": "TMJStudio_0.2.7_x64_en-US.msi",
+          "label": "↓ .msi"
+        }
+      ],
+      "macos-x64": [
+        {
+          "file": "TMJStudio_0.2.7_x64.dmg",
+          "label": "↓ .dmg (Intel)"
+        }
+      ]
+    },
+    "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/studio-v0.2.7"
+  },
+  "drivers": [
+    {
+      "id": "python",
+      "name": "Python",
+      "lib": "tmjlite-lib-python",
+      "prefix": "tmjlite-python",
+      "desc": "Lib pronta com o motor nativo embutido (Windows, Linux e macOS). Extraia, copie a pasta tmjlite/ para o seu projeto e importe — sem pip, sem build.",
+      "install": "extraia o zip → copie tmjlite/ para o projeto → import tmjlite",
+      "code": "import tmjlite\n\ndb = tmjlite.connect(\"app.tmjp\")\ndb.execute(\"CREATE TABLE t (id PK, name TEXT);\")\nfor row in db.query(\"SELECT * FROM t;\"):\n    print(row[\"name\"])"
+    },
+    {
+      "id": "node",
+      "name": "Node.js",
+      "lib": "tmjlite-lib-node",
+      "prefix": "tmjlite-node",
+      "desc": "Pacote npm local com o motor nativo embutido (Windows, Linux e macOS). Extraia e instale com um comando — Node 18+.",
+      "install": "npm install ./tmjlite",
+      "code": "const { connect } = require('tmjlite');\n\nconst db = connect('app.tmjp');\ndb.execute('CREATE TABLE t (id PK, name TEXT);');\nconst rows = db.query('SELECT * FROM t;');\nrows.forEach(r => console.log(r.get('name')));"
+    },
+    {
+      "id": "csharp",
+      "name": "C#",
+      "lib": "tmjlite-lib-csharp",
+      "prefix": "tmjlite-csharp",
+      "desc": "Um único arquivo TMJLite.dll com o motor nativo embutido (Windows, Linux e macOS). Copie para o projeto e referencie no .csproj. .NET 8+.",
+      "install": "<Reference Include=\"TMJLite\"><HintPath>libs\\TMJLite.dll</HintPath></Reference>",
+      "code": "using TMJPlatform;\n\nusing var db = TMJLite.Connect(\"app.tmjp\");\ndb.Execute(\"CREATE TABLE t (id PK, name TEXT);\");\nforeach (var row in db.Query(\"SELECT * FROM t;\"))\n    Console.WriteLine(row[\"name\"]);"
+    },
+    {
+      "id": "java",
+      "name": "Java",
+      "lib": "tmjlite-lib-java",
+      "prefix": "tmjlite-java",
+      "desc": "Um único JAR com driver, JNA e motor nativo embutidos (Windows, Linux e macOS). Java 11+ — só adicionar ao classpath.",
+      "install": "java -cp tmjlite-<versão>.jar:. MeuApp",
+      "code": "try (Connection db = TMJLite.connect(\"app.tmjp\")) {\n    db.execute(\"CREATE TABLE t (id PK, name TEXT);\");\n    QueryResult r = db.query(\"SELECT * FROM t;\");\n    for (Row row : r) System.out.println(row.getString(\"name\"));\n}"
+    },
+    {
+      "id": "go",
+      "name": "Go",
+      "lib": "tmjlite-lib-go",
+      "prefix": "tmjlite-go",
+      "desc": "Módulo Go com header e libs nativas embutidos — go build direto, sem CGO_LDFLAGS. Requer cgo (MinGW no Windows).",
+      "install": "replace github.com/TMJPlatform/tmjlite-go => ./tmjlite-go",
+      "code": "import tmjlite \"github.com/TMJPlatform/tmjlite-go\"\n\ndb, _ := tmjlite.Open(\"app.tmjp\")\ndefer db.Close()\ndb.Execute(\"CREATE TABLE t (id PK, name TEXT);\")\nresult, _ := db.Query(\"SELECT * FROM t;\")"
+    },
+    {
+      "id": "rust",
+      "name": "Rust",
+      "prefix": "tmjlite-rust",
+      "desc": "Integração via SDK comercial TMJ (o driver Rust linka o engine em código-fonte). Demo compilada disponível por plataforma.",
+      "code": "use tmjlite_rs::Connection;\n\nlet mut db = Connection::open(\"app.tmjp\")?;\ndb.execute(\"CREATE TABLE t (id PK, name TEXT);\")?;\nlet rows = db.query(\"SELECT * FROM t;\")?;"
+    }
+  ]
+}
