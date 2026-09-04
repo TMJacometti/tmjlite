@@ -44,49 +44,49 @@
     "prefix": "tmjlite-cli"
   },
   "studio": {
-    "version": "0.2.7",
+    "version": "0.2.8",
     "prefix": "tmjstudio",
     "desc": "IDE nativa para TMJLite — explorer, SQL, mock data, índices, TRUNCATE/DROP e export. Abre e cria bancos SQLite, com auto-reload de migrations externas e bancos recentes.",
     "note": "macOS: o app não é notarizado pela Apple — se aparecer “TMJStudio está danificado”, rode no Terminal: xattr -cr /Applications/TMJStudio.app e abra de novo.",
     "files": {
       "linux-x64": [
         {
-          "file": "TMJStudio-0.2.7-1.x86_64.rpm",
+          "file": "TMJStudio-0.2.8-1.x86_64.rpm",
           "label": "↓ .rpm"
         },
         {
-          "file": "TMJStudio_0.2.7_amd64.AppImage",
+          "file": "TMJStudio_0.2.8_amd64.AppImage",
           "label": "↓ AppImage"
         },
         {
-          "file": "TMJStudio_0.2.7_amd64.deb",
+          "file": "TMJStudio_0.2.8_amd64.deb",
           "label": "↓ .deb"
         }
       ],
       "macos-arm64": [
         {
-          "file": "TMJStudio_0.2.7_aarch64.dmg",
+          "file": "TMJStudio_0.2.8_aarch64.dmg",
           "label": "↓ .dmg (Apple Silicon)"
         }
       ],
       "windows-x64": [
         {
-          "file": "TMJStudio_0.2.7_x64-setup.exe",
+          "file": "TMJStudio_0.2.8_x64-setup.exe",
           "label": "↓ Setup .exe"
         },
         {
-          "file": "TMJStudio_0.2.7_x64_en-US.msi",
+          "file": "TMJStudio_0.2.8_x64_en-US.msi",
           "label": "↓ .msi"
         }
       ],
       "macos-x64": [
         {
-          "file": "TMJStudio_0.2.7_x64.dmg",
+          "file": "TMJStudio_0.2.8_x64.dmg",
           "label": "↓ .dmg (Intel)"
         }
       ]
     },
-    "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/studio-v0.2.7"
+    "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/studio-v0.2.8"
   },
   "drivers": [
     {
