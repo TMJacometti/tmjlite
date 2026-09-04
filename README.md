@@ -1,10 +1,11 @@
 # TMJLite
 
-[![Release](https://img.shields.io/github/v/release/TMJacometti/tmjlite?label=release)](https://github.com/TMJacometti/tmjlite/releases/latest)
-[![PyPI](https://img.shields.io/pypi/v/tmjlite?label=PyPI)](https://pypi.org/project/tmjlite/)
-[![npm](https://img.shields.io/npm/v/tmjlite?label=npm)](https://www.npmjs.com/package/tmjlite)
-[![NuGet](https://img.shields.io/nuget/v/TMJLite?label=NuGet)](https://www.nuget.org/packages/TMJLite)
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.tmjacometti/tmjlite?label=Maven%20Central)](https://central.sonatype.com/artifact/io.github.tmjacometti/tmjlite)
+[![Release](https://img.shields.io/github/v/release/TMJacometti/tmjlite?filter=v*&label=release)](https://github.com/TMJacometti/tmjlite/releases?q=tag%3Av0)
+[![TMJStudio](https://img.shields.io/github/v/release/TMJacometti/tmjlite?filter=studio-v*&label=TMJStudio&color=blue)](https://github.com/TMJacometti/tmjlite/releases?q=studio)
+[![PyPI](https://img.shields.io/pypi/v/tmjlite?label=PyPI&color=orange)](https://pypi.org/project/tmjlite/)
+[![npm](https://img.shields.io/npm/v/tmjlite?label=npm&color=orange)](https://www.npmjs.com/package/tmjlite)
+[![NuGet](https://img.shields.io/nuget/v/TMJLite?label=NuGet&color=orange)](https://www.nuget.org/packages/TMJLite)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.tmjacometti/tmjlite?label=Maven%20Central&color=orange)](https://central.sonatype.com/artifact/io.github.tmjacometti/tmjlite)
 
 **TMJLite** is an embedded SQL database that lives in one `.tmjp` file — no
 server, no setup — and treats your data the way git treats your code. Open a
