@@ -1,7 +1,7 @@
 {
-  "version": "0.2.8",
+  "version": "0.2.9",
   "codename": "capivara",
-  "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/v0.2.8",
+  "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/v0.2.9",
   "platforms": [
     {
       "id": "macos-arm64",
