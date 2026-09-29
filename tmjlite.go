@@ -5,6 +5,7 @@ package tmjlite
 import "C"
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -627,4 +628,127 @@ func readResult(result *C.TmjResult) *QueryResult {
 		rows[r] = Row{columns: columns, values: values}
 	}
 	return &QueryResult{Columns: columns, Rows: rows}
+}
+
+// ===================== Prepared statements (6.4) =====================
+
+// PreparedStatement is a statement parsed ONCE and executed N times with `?`
+// parameters. Works on Connection and SharedConnection (including inside a
+// SharedConnection transaction on the same goroutine's OS thread).
+//
+//	st, _ := db.Prepare("INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;")
+//	defer st.Close()
+//	for _, it := range lote { st.Exec(it.NS, it.K, it.Samples) }
+//	rows, _ := sel.Query("ns3", "k1")
+//
+// No manual escaping: string → TEXT, int → INT, float64 → FLOAT, bool → BOOL,
+// nil → NULL.
+type PreparedStatement struct {
+	stmt   *C.TmjStmt
+	db     *C.TmjDb
+	shared *C.TmjSharedDb
+}
+
+// Prepare parses a statement with `?` placeholders on a classic connection.
+func (c *Connection) Prepare(sql string) (*PreparedStatement, error) {
+	cSQL := C.CString(sql)
+	defer C.free(unsafe.Pointer(cSQL))
+	st := C.tmjlite_prepare(c.db, cSQL)
+	if st == nil {
+		return nil, errFromDB(c.db)
+	}
+	return &PreparedStatement{stmt: st, db: c.db}, nil
+}
+
+// Prepare parses a statement with `?` placeholders on a shared connection.
+func (c *SharedConnection) Prepare(sql string) (*PreparedStatement, error) {
+	cSQL := C.CString(sql)
+	defer C.free(unsafe.Pointer(cSQL))
+	st := C.tmjlite_prepare_shared(c.db, cSQL)
+	if st == nil {
+		return nil, errFromShared(c.db)
+	}
+	return &PreparedStatement{stmt: st, shared: c.db}, nil
+}
+
+// Begin opens a transaction bound to the calling OS thread (0.2.9+). Pin the
+// goroutine with runtime.LockOSThread() between Begin and Commit/Rollback.
+func (c *SharedConnection) Begin() error    { return c.Execute("BEGIN;") }
+func (c *SharedConnection) Commit() error   { return c.Execute("COMMIT;") }
+func (c *SharedConnection) Rollback() error { return c.Execute("ROLLBACK;") }
+
+// ParamCount is the number of `?` placeholders.
+func (s *PreparedStatement) ParamCount() int {
+	return int(C.tmjlite_stmt_param_count(s.stmt))
+}
+
+func paramsJSON(params []interface{}) (*C.char, error) {
+	if params == nil {
+		params = []interface{}{}
+	}
+	b, err := json.Marshal(params)
+	if err != nil {
+		return nil, &TMJLiteError{Message: "params: " + err.Error()}
+	}
+	return C.CString(string(b)), nil
+}
+
+func (s *PreparedStatement) lastErr() error {
+	if s.shared != nil {
+		return errFromShared(s.shared)
+	}
+	return errFromDB(s.db)
+}
+
+// Exec runs the statement with the given parameters.
+func (s *PreparedStatement) Exec(params ...interface{}) error {
+	if s.stmt == nil {
+		return &TMJLiteError{Message: "PreparedStatement is closed"}
+	}
+	cParams, err := paramsJSON(params)
+	if err != nil {
+		return err
+	}
+	defer C.free(unsafe.Pointer(cParams))
+	var rc C.int
+	if s.shared != nil {
+		rc = C.tmjlite_stmt_exec_shared(s.shared, s.stmt, cParams)
+	} else {
+		rc = C.tmjlite_stmt_exec(s.db, s.stmt, cParams)
+	}
+	if rc != C.TMJLITE_OK {
+		return s.lastErr()
+	}
+	return nil
+}
+
+// Query runs a SELECT with the given parameters.
+func (s *PreparedStatement) Query(params ...interface{}) (*QueryResult, error) {
+	if s.stmt == nil {
+		return nil, &TMJLiteError{Message: "PreparedStatement is closed"}
+	}
+	cParams, err := paramsJSON(params)
+	if err != nil {
+		return nil, err
+	}
+	defer C.free(unsafe.Pointer(cParams))
+	var result *C.TmjResult
+	if s.shared != nil {
+		result = C.tmjlite_stmt_query_shared(s.shared, s.stmt, cParams)
+	} else {
+		result = C.tmjlite_stmt_query(s.db, s.stmt, cParams)
+	}
+	if result == nil {
+		return nil, s.lastErr()
+	}
+	defer C.tmjlite_result_free(result)
+	return readResult(result), nil
+}
+
+// Close frees the statement.
+func (s *PreparedStatement) Close() {
+	if s.stmt != nil {
+		C.tmjlite_stmt_free(s.stmt)
+		s.stmt = nil
+	}
 }

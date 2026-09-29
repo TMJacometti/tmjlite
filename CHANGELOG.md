@@ -11,6 +11,44 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-09-29
+
+Origem: diagnóstico de desempenho de escrita do tmjLens (2026-09-29) — cada
+escrita auto-commitada custava ~400 ms num banco de 13 MB.
+
+### Corrigido
+- **Write-through incremental (6.1)**: UPDATE/DELETE (e INSERT em tabela com
+  índice UNIQUE) reescreviam a tabela inteira e reconstruíam todos os índices
+  no engine a cada statement — O(N) por commit. Agora o executor registra
+  deltas por linha (rowid, antes, depois) e o engine aplica só as páginas
+  tocadas; fallback automático para o rewrite quando o engine diverge da RAM.
+  UPDATE de 1 linha em 20k linhas: 76 ms → 4 ms (Mac, `.sync full`, o resto
+  é o fsync); INSERT 111 → 4 ms; DELETE 84 → 4 ms; dentro de transação
+  0,2 ms/stmt.
+- Lado RAM: checagem de UNIQUE no INSERT era O(N²) (purge global de ghosts);
+  DELETE reconstruía o índice de PK (agora remove chaves); `row_idx_for_rowid`
+  era varredura linear (agora busca binária); UPDATE/DELETE usam os índices
+  para achar as linhas candidatas em vez de varrer a tabela.
+- `SELECT DISTINCT` não parseava ("expected From, got Identifier").
+- Prepared INSERT ignorava tokens depois do `VALUES (...)`.
+
+### Adicionado
+- **Transações na SharedConnection (6.2)**: `BEGIN`/`COMMIT`/`ROLLBACK` são
+  aceitos no handle shared e ficam presos à thread que abriu; outras threads
+  bloqueiam em escritas/leituras até o fim. FFI (`tmjlite_exec_shared`) e os
+  seis drivers (`transaction()`/`begin()`/`Transaction(...)`).
+- **`INSERT … ON CONFLICT (cols) DO NOTHING | DO UPDATE SET col = valor |
+  excluded.col` (6.3)**: upsert nativo em um commit, sem SELECT prévio; o alvo
+  deve casar um índice UNIQUE ou a PK; funciona em transação e em prepared.
+- **Prepared statements genéricos (6.4)**: `?` em INSERT, UPDATE, DELETE,
+  SELECT e upsert; FFI `tmjlite_prepare[_shared]`, `tmjlite_stmt_exec/query
+  [_shared]`, `tmjlite_stmt_param_count`, `tmjlite_stmt_free` — parâmetros
+  como array JSON (tipos preservados, sem escape); `prepare()` em todos os
+  drivers (Connection e SharedConnection).
+- **`SELECT DISTINCT` (6.5)**, com ORDER BY/LIMIT (dedupe antes do LIMIT).
+- Benchmark de referência: 450 upserts preparados em transação (lote do
+  tmjLens) = 25 ms no total, contra minutos antes.
+
 ## [0.2.8] - 2026-09-03
 
 ### Adicionado
@@ -81,7 +119,8 @@ versão do engine em que saiu.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.9...HEAD
+[0.2.9]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.5...v0.2.6

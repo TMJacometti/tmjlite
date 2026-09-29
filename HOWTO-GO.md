@@ -108,6 +108,31 @@ Auto-commit por statement (use `Open()` para transações).
 **Multi-processo é exclusivo**: segundo processo falha com
 `database is locked by another process`.
 
+### Transações e prepared statements na SharedConnection (0.2.9+)
+
+```go
+db, _ := tmjlite.OpenShared("app.tmjp")
+
+// Transação presa à THREAD do SO que deu Begin: prenda a goroutine com
+// runtime.LockOSThread() entre Begin e Commit/Rollback. Outras goroutines
+// bloqueiam em escritas e novas leituras até o fim.
+runtime.LockOSThread()
+db.Begin()
+for _, it := range lote { db.Execute(fmt.Sprintf("UPDATE rs SET samples = %d WHERE ...", it.Samples)) }
+db.Commit()
+runtime.UnlockOSThread()
+
+// Prepared statement: parse uma vez, executa N vezes; parâmetros tipados,
+// sem escape manual (string → TEXT, int → INT, float64 → FLOAT, bool, nil → NULL).
+st, _ := db.Prepare("INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;")
+defer st.Close()
+for _, it := range lote { st.Exec(it.NS, it.K, it.Samples) }
+sel, _ := db.Prepare("SELECT samples FROM rs WHERE ns = ? AND k = ?;")
+rows, _ := sel.Query("ns3", "k1")
+```
+
+`Prepare()` também existe na `Connection` clássica.
+
 ## ShadowConnection e branches — escrita multi-processo por merge (git-merge)
 
 ```go
