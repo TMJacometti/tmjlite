@@ -11,6 +11,16 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
+### Corrigido
+- Recuperação do WAL agora falha explicitamente diante de erros de abertura/leitura
+  ou cabeçalho/checksum inválido antes de um commit recuperável, preservando o
+  sidecar em vez de abrir dados principais possivelmente antigos.
+- `COMMIT` só encerra a transação depois do sync durável; falhas tentam restaurar
+  todas as tabelas e liberar o writer. Erros de `ROLLBACK` são propagados e, se
+  a restauração falhar, o handle compartilhado exige fechar e reabrir.
+
 ## [0.2.9] - 2026-09-29
 
 Origem: diagnóstico de desempenho de escrita do tmjLens (2026-09-29) — cada
@@ -119,7 +129,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.9...v0.3.0
 [0.2.9]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.6...v0.2.7
