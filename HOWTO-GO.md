@@ -133,6 +133,20 @@ rows, _ := sel.Query("ns3", "k1")
 
 `Prepare()` também existe na `Connection` clássica.
 
+### Cursor — leitura em streaming (0.3.1+)
+
+```go
+// uma linha por vez, direto do snapshot: memória O(1 linha) para N linhas
+cur, err := db.Cursor("SELECT samples, cpu_hist FROM rs WHERE ns = ?", "ns3")
+if err != nil { return err }
+defer cur.Close()   // enquanto o cursor vive, o checkpoint do WAL é adiado
+for cur.Next() {
+    row := cur.Row()
+    total += row.Get(0).(int64)
+}
+if err := cur.Err(); err != nil { return err }
+```
+
 ## ShadowConnection e branches — escrita multi-processo por merge (git-merge)
 
 ```go

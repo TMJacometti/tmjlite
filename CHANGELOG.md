@@ -11,6 +11,54 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-15
+
+Origem: dossiê do OOM em produção do tmjLens (2026-10-14/15) — "o formato do
+result set como teto de memória".
+
+### Corrigido
+- **Leitura no handle compartilhado materializava a tabela inteira.** Toda
+  `query_shared` carregava TODAS as linhas das tabelas referenciadas do
+  snapshot para a RAM (mesmo com `WHERE` por índice), relia todas as páginas
+  do disco a cada query (o snapshot não tinha cache) e só então montava o
+  resultado — três cópias, e memória proporcional à tabela, não ao resultado.
+  Agora SELECTs de tabela única rodam em **streaming direto da B+tree do
+  snapshot** (seek por índice quando há; `LIMIT` para cedo; `GROUP BY` em
+  O(grupos)), e o snapshot tem cache de páginas (8 MiB por cursor/query).
+  Formas que não streamam (joins, subqueries, window functions, `DISTINCT`,
+  `ORDER BY`/`LIMIT` sobre agregação) continuam pelo caminho materializado.
+- `tmjlite_version()` devolvia `0.1.0-capivara`; agora é a versão do crate.
+
+### Adicionado
+- **Cursor na FFI (4.1)**: `tmjlite_cursor_open_shared`,
+  `tmjlite_stmt_cursor_shared` (prepared + params), `tmjlite_cursor_step`
+  (1/0/-1), `column_count/name`, `text` (emprestado até o próximo step),
+  `is_null`, `i64`, `f64`, `bool`, `is_streaming`, `errmsg`, `close`.
+  Memória por query = uma linha. Dentro de `BEGIN` na mesma thread o cursor
+  lê a transação; fora, um snapshot consistente que vive até o `close`.
+- **Acessores tipados no `TmjResult` (4.2)**: `tmjlite_result_is_null`,
+  `_i64`, `_f64`, `_bool`. O `TmjResult` agora guarda os valores tipados e
+  só constrói o texto de uma célula quando `tmjlite_result_value` é chamado —
+  ponteiro emprestado, válido até `tmjlite_result_free` (documentado no
+  header; 4.4).
+- `SharedDb::query_cursor` / `query_cursor_prepared` no engine; `cursor()`
+  nos drivers Python (`Cursor` iterável), Node (`for…of`), C#
+  (`IEnumerable<Row>`), Java (`Iterable<Row>`, try-with-resources), Go
+  (`Next()/Row()/Err()`) e Rust (`cursor()`/`cursor_prepared()` com `fold`).
+- Driver Rust (`tmjlite-rs`) equiparado aos demais: `prepare` /
+  `execute_prepared` / `query_prepared` na `Connection` e na
+  `SharedConnection`; `begin/commit/rollback/transaction` na `SharedConnection`.
+- `version()` em Python e Node (já existia em C#, Java e Go).
+- Benchmark de leitura `engine/bench/read_path.py` (cenário do tmjLens: 1
+  container × 2.160 janelas × histogramas de 200 buckets): caminho antigo
+  32,6 MB de pico extra por query; cursor 9,2 MB (8 MiB é o cache de
+  páginas, teto fixo), independente de N.
+
+### Não feito (segue no backlog)
+- Agregação custom registrada pelo cliente (`hist_merge`, 4.3): o cursor já
+  leva a compactação a O(1 linha); um tipo/agg de histograma só se isso não
+  bastar.
+
 ## [0.3.0] - 2026-10-07
 
 ### Corrigido
@@ -129,7 +177,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.9...v0.3.0
 [0.2.9]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.7...v0.2.8

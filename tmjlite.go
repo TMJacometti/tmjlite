@@ -752,3 +752,108 @@ func (s *PreparedStatement) Close() {
 		s.stmt = nil
 	}
 }
+
+// ===================== Cursor: one row at a time (0.3.1+) =====================
+
+// Cursor reads straight from an MVCC snapshot without materializing the table
+// or the result set: memory is O(1 row) for a SELECT of N rows.
+//
+//	cur, _ := db.Cursor("SELECT samples, cpu_hist FROM rs WHERE ns = ?", "ns3")
+//	defer cur.Close()
+//	for cur.Next() {
+//		row := cur.Row()
+//		total += row.values[0].(int64)
+//	}
+//
+// Outside a transaction the cursor holds a snapshot until Close (checkpoints
+// deferred): close it early.
+type Cursor struct {
+	c       *C.TmjCursor
+	columns []string
+	row     Row
+	err     error
+}
+
+// Cursor opens a streaming SELECT on the shared connection. With params the SQL uses `?`.
+func (c *SharedConnection) Cursor(sql string, params ...interface{}) (*Cursor, error) {
+	cSQL := C.CString(sql)
+	defer C.free(unsafe.Pointer(cSQL))
+	var cur *C.TmjCursor
+	if len(params) == 0 {
+		cur = C.tmjlite_cursor_open_shared(c.db, cSQL)
+	} else {
+		st := C.tmjlite_prepare_shared(c.db, cSQL)
+		if st == nil {
+			return nil, errFromShared(c.db)
+		}
+		defer C.tmjlite_stmt_free(st)
+		cParams, err := paramsJSON(params)
+		if err != nil {
+			return nil, err
+		}
+		defer C.free(unsafe.Pointer(cParams))
+		cur = C.tmjlite_stmt_cursor_shared(c.db, st, cParams)
+	}
+	if cur == nil {
+		return nil, errFromShared(c.db)
+	}
+	n := int(C.tmjlite_cursor_column_count(cur))
+	cols := make([]string, n)
+	for i := 0; i < n; i++ {
+		if name := C.tmjlite_cursor_column_name(cur, C.int(i)); name != nil {
+			cols[i] = C.GoString(name)
+		}
+	}
+	return &Cursor{c: cur, columns: cols}, nil
+}
+
+// Columns of the result.
+func (cu *Cursor) Columns() []string { return cu.columns }
+
+// Streaming reports whether rows come straight from the snapshot.
+func (cu *Cursor) Streaming() bool { return C.tmjlite_cursor_is_streaming(cu.c) == 1 }
+
+// Next advances to the next row. Returns false at the end or on error (see Err).
+func (cu *Cursor) Next() bool {
+	if cu.c == nil {
+		return false
+	}
+	rc := C.tmjlite_cursor_step(cu.c)
+	if rc == 0 {
+		return false
+	}
+	if rc < 0 {
+		if msg := C.tmjlite_cursor_errmsg(cu.c); msg != nil {
+			cu.err = &TMJLiteError{Message: C.GoString(msg)}
+		} else {
+			cu.err = &TMJLiteError{Message: "cursor step failed"}
+		}
+		return false
+	}
+	values := make([]interface{}, len(cu.columns))
+	for i := range cu.columns {
+		if C.tmjlite_cursor_is_null(cu.c, C.int(i)) == 1 {
+			values[i] = nil
+			continue
+		}
+		if t := C.tmjlite_cursor_text(cu.c, C.int(i)); t != nil {
+			values[i] = parseValue(C.GoString(t))
+		}
+	}
+	cu.row = Row{columns: cu.columns, values: values}
+	return true
+}
+
+// Row is the current row after a successful Next.
+func (cu *Cursor) Row() Row { return cu.row }
+
+// Err is the error that stopped Next, if any.
+func (cu *Cursor) Err() error { return cu.err }
+
+// Close releases the cursor and its snapshot.
+func (cu *Cursor) Close() {
+	if cu.c != nil {
+		C.tmjlite_cursor_close(cu.c)
+		cu.c = nil
+	}
+}
