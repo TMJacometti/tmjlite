@@ -95,7 +95,7 @@
       "lib": "tmjlite-lib-python",
       "prefix": "tmjlite-python",
       "desc": "Instale pelo PyPI: o wheel já traz o motor nativo para macOS (Apple Silicon), Linux x64 e Windows x64 — sem build, sem configuração.",
-      "code": "import tmjlite\n\ndb = tmjlite.connect(\"app.tmjp\")\ndb.execute(\"CREATE TABLE t (id PK, name TEXT);\")\nfor row in db.query(\"SELECT * FROM t;\"):\n    print(row[\"name\"])",
+      "code": "import tmjlite\n\ndb = tmjlite.connect_shared(\"app.tmjp\")          # thread-safe, MVCC\nst = db.prepare(\"INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) \"\n                \"ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;\")\nwith db.transaction():                           # um commit para o lote\n    for it in lote:\n        st.execute([it.ns, it.k, it.samples])\nwith db.cursor(\"SELECT samples FROM rs WHERE ns = ?\", [\"ns3\"]) as cur:\n    total = sum(row[\"samples\"] for row in cur)   # streaming: memória O(1 linha)",
       "registry": {
         "label": "PyPI",
         "cmd": "pip install tmjlite",
@@ -108,7 +108,7 @@
       "lib": "tmjlite-lib-node",
       "prefix": "tmjlite-node",
       "desc": "Instale pelo npm: o pacote traz o motor nativo em prebuilds/ para macOS (Apple Silicon), Linux x64 e Windows x64.",
-      "code": "const { connect } = require('tmjlite');\n\nconst db = connect('app.tmjp');\ndb.execute('CREATE TABLE t (id PK, name TEXT);');\nconst rows = db.query('SELECT * FROM t;');\nrows.forEach(r => console.log(r.get('name')));",
+      "code": "const tmjlite = require('tmjlite');\n\nconst db = tmjlite.connectShared('app.tmjp');   // thread-safe, MVCC\nconst st = db.prepare('INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) ' +\n                      'ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;');\ndb.begin();                                      // um commit para o lote\nfor (const it of lote) st.execute([it.ns, it.k, it.samples]);\ndb.commit();\nconst cur = db.cursor('SELECT samples FROM rs WHERE ns = ?', ['ns3']);\nlet total = 0;\nfor (const row of cur) total += row.samples;     // streaming: memória O(1 linha)\ncur.close();",
       "registry": {
         "label": "npm",
         "cmd": "npm install tmjlite",
@@ -121,7 +121,7 @@
       "lib": "tmjlite-lib-csharp",
       "prefix": "tmjlite-csharp",
       "desc": "Instale pelo NuGet: um único TMJLite.dll com o motor nativo embutido para Windows, Linux e macOS (.NET 8+).",
-      "code": "using TMJPlatform;\n\nusing var db = TMJLite.Connect(\"app.tmjp\");\ndb.Execute(\"CREATE TABLE t (id PK, name TEXT);\");\nforeach (var row in db.Query(\"SELECT * FROM t;\"))\n    Console.WriteLine(row[\"name\"]);",
+      "code": "using TMJPlatform;\n\nusing var db = TMJLite.ConnectShared(\"app.tmjp\");   // thread-safe, MVCC\nusing var st = db.Prepare(\"INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) \" +\n                          \"ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;\");\ndb.Transaction(() => { foreach (var it in lote) st.Execute(it.Ns, it.K, it.Samples); });\nusing var cur = db.Cursor(\"SELECT samples FROM rs WHERE ns = ?\", \"ns3\");\nlong total = 0;\nforeach (var row in cur) total += row.GetInt(\"samples\");   // streaming: O(1 linha)",
       "registry": {
         "label": "NuGet",
         "cmd": "dotnet add package TMJLite",
@@ -134,7 +134,7 @@
       "lib": "tmjlite-lib-java",
       "prefix": "tmjlite-java",
       "desc": "Instale pelo Maven Central: o jar traz as nativas nos caminhos do JNA — funciona em Windows, Linux e macOS (Java 11+).",
-      "code": "try (Connection db = TMJLite.connect(\"app.tmjp\")) {\n    db.execute(\"CREATE TABLE t (id PK, name TEXT);\");\n    QueryResult r = db.query(\"SELECT * FROM t;\");\n    for (Row row : r) System.out.println(row.getString(\"name\"));\n}",
+      "code": "try (SharedConnection db = TMJLite.connectShared(\"app.tmjp\");   // thread-safe, MVCC\n     PreparedStatement st = db.prepare(\n         \"INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;\")) {\n    db.begin();                                   // um commit para o lote\n    for (Item it : lote) st.execute(it.ns, it.k, it.samples);\n    db.commit();\n    try (Cursor cur = db.cursor(\"SELECT samples FROM rs WHERE ns = ?\", \"ns3\")) {\n        for (Row row : cur) total += row.getInt(\"samples\");   // streaming: O(1 linha)\n    }\n}",
       "registry": {
         "label": "Maven Central",
         "cmd": "<dependency>\n  <groupId>io.github.tmjacometti</groupId>\n  <artifactId>tmjlite</artifactId>\n  <version>{version}</version>\n</dependency>",
@@ -147,7 +147,7 @@
       "lib": "tmjlite-lib-go",
       "prefix": "tmjlite-go",
       "desc": "Módulo Go no repo público, com header e nativas dentro (cgo). Ou baixe o zip com demo compilada por OS.",
-      "code": "import tmjlite \"github.com/TMJPlatform/tmjlite-go\"\n\ndb, _ := tmjlite.Open(\"app.tmjp\")\ndefer db.Close()\ndb.Execute(\"CREATE TABLE t (id PK, name TEXT);\")\nresult, _ := db.Query(\"SELECT * FROM t;\")",
+      "code": "import tmjlite \"github.com/TMJacometti/tmjlite\"\n\ndb, _ := tmjlite.OpenShared(\"app.tmjp\")          // goroutine-safe, MVCC\nst, _ := db.Prepare(\"INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;\")\nruntime.LockOSThread(); db.Begin()               // um commit para o lote\nfor _, it := range lote { st.Exec(it.NS, it.K, it.Samples) }\ndb.Commit(); runtime.UnlockOSThread()\ncur, _ := db.Cursor(\"SELECT samples FROM rs WHERE ns = ?\", \"ns3\")\ndefer cur.Close()\nfor cur.Next() { total += cur.Row().GetInt(\"samples\") }   // streaming: O(1 linha)",
       "registry": {
         "label": "GitHub (go get)",
         "cmd": "go get github.com/TMJacometti/tmjlite@v{version}",
@@ -160,7 +160,7 @@
       "name": "Rust",
       "prefix": "tmjlite-rust",
       "desc": "O driver Rust linka o engine em fonte e é distribuído como SDK sob licença. Aqui você baixa a demo compilada por OS para experimentar a API.",
-      "code": "use tmjlite_rs::Connection;\n\nlet mut db = Connection::open(\"app.tmjp\")?;\ndb.execute(\"CREATE TABLE t (id PK, name TEXT);\")?;\nlet rows = db.query(\"SELECT * FROM t;\")?;"
+      "code": "use tmjlite_rs::{SharedConnection, Value};\n\nlet db = SharedConnection::open(\"app.tmjp\")?;    // thread-safe, MVCC\nlet st = db.prepare(\"INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;\")?;\ndb.transaction(|db| {                             // um commit para o lote\n    for it in &lote { db.execute_prepared(&st, &[Value::Text(it.ns.clone()), Value::Text(it.k.clone()), Value::Int(it.samples)])?; }\n    Ok(())\n})?;\nlet total = db.cursor(\"SELECT samples FROM rs WHERE ns = 'ns3';\")?\n    .fold(0i64, |t, row| Ok(t + row.get_int(0).unwrap_or(0)))?;   // streaming: O(1 linha)"
     }
   ]
 }
