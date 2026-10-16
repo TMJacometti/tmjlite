@@ -11,6 +11,57 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-16
+
+Origem: `write-load --help` do loadTester de Thiago (2026-10-16) — "skips
+known-broken subquery ops (engine table-not-found)".
+
+### Corrigido
+- **Subquery no handle compartilhado falhava com "table not found".** O
+  caminho materializado do snapshot carregava só as tabelas de `FROM`/`JOIN`
+  (`stmt_tables`); `WHERE id IN (SELECT … FROM outra)`, `EXISTS (…)` e
+  subquery escalar no SELECT referenciam outra tabela e ela não estava no
+  rascunho. Agora a coleta desce nas subqueries em qualquer profundidade
+  (também para `EXPLAIN` e cursor). Teste com as três formas do loadTester.
+
+### Nota de versão
+- A **0.3.3** teve o workflow cancelado no meio: o crate `tmjlite` 0.3.3 e o
+  Maven chegaram a sair (sem este fix); PyPI, NuGet, release do GitHub e
+  espelho não. A 0.3.4 é a 0.3.3 completa + este fix, em todos os registros.
+
+## [0.3.3] - 2026-10-15
+
+Origem: loadTest de Thiago (2026-10-16, 32 threads × 24 formas de operação,
+16.000 ops, zero erro) — `SELECT WHERE` com mínimo de 0,1 ms e média de
+150 ms: leitura que não trabalha, espera.
+
+### Corrigido
+- **Leitores entravam na fila do writer.** `SharedDb::snapshot()` pegava o
+  mutex do writer para clonar o índice do WAL; toda leitura esperava cada
+  escrita autocommit (inclusive o `F_FULLFSYNC`) e transações inteiras de
+  outras threads. Agora o pager **publica** o índice commitado ao fim de
+  cada commit/checkpoint (`SnapshotHandle`, lock de microssegundos) e o
+  leitor abre a view direto dele, sem o writer. Leitura durante transação
+  alheia enxerga o último COMMIT (isolamento por snapshot, que era o
+  prometido). O checkpoint decide "há leitor?" e dobra o WAL sob o mesmo
+  lock, publicando o índice vazio antes de apagar o arquivo — sem janela
+  para um snapshot apontar para um WAL removido.
+  Bench `engine/bench/reader_writer.py` (32 threads, mix de escrita
+  autocommit + transação + leitura, Mac): `SELECT WHERE` 72 → 0,4 ms de
+  média e 134 → 1,8 ms de p95; `COUNT(*)` 71 → 4,6 ms; `ORDER BY LIMIT`
+  93 → 26 ms; `EXPLAIN` 119 → 32 ms. Escritas continuam no teto do fsync.
+- `EXPLAIN` na `SharedConnection` era tratado como escrita (fila do writer).
+  Agora roda no snapshot, com os índices do catálogo recriados no rascunho
+  para o plano sair igual ao do banco real.
+
+### Adicionado
+- `Pager::snapshot_handle()` / `Engine::snapshot_handle()` /
+  `ReadEngine::from_view()`: snapshots MVCC sem referência ao writer.
+- Testes: handle enxerga só o commitado; checkpoint adia com view viva e
+  dobra depois; corrida de 4 leitores por handle × 150 commits/checkpoints;
+  leitor não espera transação alheia; p95 de leitor sob 8 escritores em
+  fsync < 20 ms; `EXPLAIN` por índice no snapshot com transação aberta.
+
 ## [0.3.2] - 2026-10-15
 
 Origem: dossiê #2 do tmjLens em EKS (2026-10-15) — RSS ~19× o arquivo
@@ -49,6 +100,22 @@ Origem: dossiê #2 do tmjLens em EKS (2026-10-15) — RSS ~19× o arquivo
   com asserção de que cada seek devolve as mesmas linhas que o scan.
 
 ### Adicionado
+- **Driver Rust público: crate `tmjlite` no crates.io** (`cargo add tmjlite`).
+  Até aqui o único driver Rust era o `tmjlite-rs`, que linka o engine em fonte
+  e mora no repositório privado — ninguém de fora conseguia usar, embora a
+  landing o listasse. O crate novo (`drivers/rust-ffi`) é só bindings
+  `extern "C"` sobre a `libtmjlite_ffi` + carregador (`libloading`), com as
+  nativas pré-compiladas dentro do pacote (`lib/<plataforma>/`, macOS arm64,
+  Linux x64, Windows x64); nenhuma linha do engine sai do privado. Mesma API
+  dos outros drivers: `Connection`, `SharedConnection` (prepared, transação
+  por thread, cursor em streaming, `set_memory_budget`/`memory_stats`/
+  `release_memory`/`set_strict_streaming`), `ShadowConnection` (branches,
+  `seal`, `conflicts`, `commit`). Job `publish-crates` no release (input
+  `crates_version` para republicar), zip `tmjlite-lib-rust-<ver>.zip`.
+  O SDK `tmjlite-rs` (engine em fonte) **saiu do repositório** — quem o
+  usava por `git`+tag continua funcionando nas tags ≤ v0.3.2; migre para
+  `tmjlite` (mesma API; `tmjlite_rs::` → `tmjlite::`). O exemplo
+  `cadastro/rust` ainda aponta para o SDK antigo e será portado depois.
 - **Teto de memória e observabilidade na `SharedConnection` (7.1)**:
   `set_memory_budget(bytes)` — acima do teto, depois de cada escrita durável
   (autocommit ou COMMIT), o cache de tabelas é descartado e a memória
@@ -231,7 +298,9 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.9...v0.3.0

@@ -124,8 +124,10 @@ void tmjlite_close_shared(TmjSharedDb *db);
 /* Execute a non-query statement. Thread-safe.
  * Transactions: BEGIN opens an interactive transaction bound to the CALLING
  * THREAD; its statements (exec/query/stmt_*) run inside it until COMMIT or
- * ROLLBACK on that same thread. Other threads block on writes (and on new
- * reads) until it ends. */
+ * ROLLBACK on that same thread. Other threads block on WRITES until it ends;
+ * their reads (query/cursor/EXPLAIN) keep running on a snapshot of the last
+ * COMMIT and never wait for the writer (0.3.3+; up to 0.3.2 they queued
+ * behind every autocommit fsync and every open transaction). */
 int tmjlite_exec_shared(const TmjSharedDb *db, const char *sql);
 
 /* Execute any statement and get the result. Thread-safe.

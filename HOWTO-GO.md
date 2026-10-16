@@ -115,7 +115,7 @@ db, _ := tmjlite.OpenShared("app.tmjp")
 
 // Transação presa à THREAD do SO que deu Begin: prenda a goroutine com
 // runtime.LockOSThread() entre Begin e Commit/Rollback. Outras goroutines
-// bloqueiam em escritas e novas leituras até o fim.
+// bloqueiam só em escritas até o fim; leituras seguem em snapshot do último COMMIT (0.3.3+).
 runtime.LockOSThread()
 db.Begin()
 for _, it := range lote { db.Execute(fmt.Sprintf("UPDATE rs SET samples = %d WHERE ...", it.Samples)) }
