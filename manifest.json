@@ -158,9 +158,14 @@
     {
       "id": "rust",
       "name": "Rust",
-      "prefix": "tmjlite-rust",
-      "desc": "O driver Rust linka o engine em fonte e é distribuído como SDK sob licença. Aqui você baixa a demo compilada por OS para experimentar a API.",
-      "code": "use tmjlite_rs::{SharedConnection, Value};\n\nlet db = SharedConnection::open(\"app.tmjp\")?;    // thread-safe, MVCC\nlet st = db.prepare(\"INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;\")?;\ndb.transaction(|db| {                             // um commit para o lote\n    for it in &lote { db.execute_prepared(&st, &[Value::Text(it.ns.clone()), Value::Text(it.k.clone()), Value::Int(it.samples)])?; }\n    Ok(())\n})?;\nlet total = db.cursor(\"SELECT samples FROM rs WHERE ns = 'ns3';\")?\n    .fold(0i64, |t, row| Ok(t + row.get_int(0).unwrap_or(0)))?;   // streaming: O(1 linha)"
+      "desc": "Instale pelo crates.io: o crate traz o engine nativo pré-compilado em lib/<plataforma>/ (macOS Apple Silicon, Linux x64, Windows x64) — nada é compilado no seu build.",
+      "code": "use tmjlite::{SharedConnection, Value};\n\nlet db = SharedConnection::open(\"app.tmjp\")?;    // thread-safe, MVCC\nlet st = db.prepare(\"INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;\")?;\ndb.transaction(|db| {                             // um commit para o lote\n    for it in &lote { db.execute_prepared(&st, &[it.ns.as_str().into(), it.k.as_str().into(), Value::Int(it.samples)])?; }\n    Ok(())\n})?;\nlet total = db.cursor(\"SELECT samples FROM rs WHERE ns = 'ns3';\")?\n    .fold(0i64, |t, row| Ok(t + row.get_int(0).unwrap_or(0)))?;   // streaming: O(1 linha)",
+      "lib": "tmjlite-lib-rust",
+      "registry": {
+        "label": "crates.io",
+        "cmd": "cargo add tmjlite",
+        "url": "https://crates.io/crates/tmjlite"
+      }
     }
   ]
 }
