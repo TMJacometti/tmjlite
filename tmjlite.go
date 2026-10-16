@@ -677,6 +677,74 @@ func (c *SharedConnection) Begin() error    { return c.Execute("BEGIN;") }
 func (c *SharedConnection) Commit() error   { return c.Execute("COMMIT;") }
 func (c *SharedConnection) Rollback() error { return c.Execute("ROLLBACK;") }
 
+// MemoryStats is the estimate of what a SharedConnection holds in RAM (0.3.2+).
+type MemoryStats struct {
+	TotalBytes    int64         `json:"total_bytes"`
+	TableBytes    int64         `json:"table_bytes"`
+	IndexBytes    int64         `json:"index_bytes"`
+	RowCacheBytes int64         `json:"row_cache_bytes"`
+	Rows          int64         `json:"rows"`
+	Tables        []TableMemory `json:"tables"`
+}
+
+// TableMemory is one materialized table inside MemoryStats.
+type TableMemory struct {
+	Name  string `json:"name"`
+	Rows  int64  `json:"rows"`
+	Bytes int64  `json:"bytes"`
+}
+
+// SetMemoryBudget caps (in bytes) the handle's RAM cache of tables (0.3.2+).
+// Tables the handle has WRITTEN to stay resident (rows + indexes); reads do
+// not populate it. When the estimate exceeds the budget after a durable
+// write (autocommit or COMMIT) the cache is dropped and memory returned to
+// the OS. 0 disables.
+func (c *SharedConnection) SetMemoryBudget(bytes uint64) error {
+	if C.tmjlite_set_memory_budget_shared(c.db, C.uint64_t(bytes)) != C.TMJLITE_OK {
+		return errFromShared(c.db)
+	}
+	return nil
+}
+
+// MemoryStats returns what the handle holds in RAM; nil inside another
+// goroutine's transaction.
+func (c *SharedConnection) MemoryStats() (*MemoryStats, error) {
+	p := C.tmjlite_memory_stats_shared(c.db)
+	if p == nil {
+		return nil, nil
+	}
+	defer C.tmjlite_string_free(p)
+	var st MemoryStats
+	if err := json.Unmarshal([]byte(C.GoString(p)), &st); err != nil {
+		return nil, &TMJLiteError{Message: "memory_stats: " + err.Error()}
+	}
+	return &st, nil
+}
+
+// ReleaseMemory drops the table cache now and returns how many tables were
+// dropped (0 inside a transaction).
+func (c *SharedConnection) ReleaseMemory() (int, error) {
+	n := int(C.tmjlite_release_memory_shared(c.db))
+	if n < 0 {
+		return 0, errFromShared(c.db)
+	}
+	return n, nil
+}
+
+// SetStrictStreaming makes Cursor fail (with the reason) for shapes that
+// cannot stream (JOIN, DISTINCT, subquery, window function, ORDER BY/LIMIT
+// over aggregate) instead of silently materializing.
+func (c *SharedConnection) SetStrictStreaming(on bool) error {
+	v := C.int(0)
+	if on {
+		v = 1
+	}
+	if C.tmjlite_set_strict_streaming_shared(c.db, v) != C.TMJLITE_OK {
+		return errFromShared(c.db)
+	}
+	return nil
+}
+
 // ParamCount is the number of `?` placeholders.
 func (s *PreparedStatement) ParamCount() int {
 	return int(C.tmjlite_stmt_param_count(s.stmt))

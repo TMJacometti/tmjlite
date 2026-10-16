@@ -11,6 +11,60 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-15
+
+Origem: dossiê #2 do tmjLens em EKS (2026-10-15) — RSS ~19× o arquivo
+(111 MiB → 2,1 GiB), crescimento em degrau por lote e depois plano.
+
+### Corrigido
+- **Raiz de índice secundário obsoleta no catálogo (silencioso, anterior a
+  0.3.x).** Quando a raiz da B+tree de um índice mudava (split da raiz) no
+  INSERT autocommit, no INSERT em lote ou no delta de UPDATE, só a meta em
+  RAM era atualizada; o catálogo em disco só era regravado quando a raiz da
+  *tabela* mudava ou o bloco de rowids estourava. Nessa janela, snapshots
+  (`SharedConnection` lendo por cursor/`query`, 0.3.1) e reabertura a frio
+  desciam por uma folha antiga e o seek por índice devolvia **vazio sem
+  erro**. Agora toda mudança de raiz de índice regrava o catálogo da tabela.
+  Teste de regressão: 600 INSERTs autocommit + 600 UPDATEs em transação com
+  seek por cursor a cada passo e após reabrir.
+- **Três cópias da tabela por lote em transação (H1 do dossiê).** Dentro de
+  `BEGIN`, todo SELECT clonava a tabela inteira (`Arc<Vec<Row>>`) e a
+  primeira mutação por tabela clonava outra vez como pré-imagem para o
+  ROLLBACK; o glibc nunca devolvia o pico. Agora o SELECT em transação
+  empresta `&table.rows` (zero cópia) e o ROLLBACK de tabela que só sofreu
+  DML desfaz o log de deltas em ordem reversa (pré-imagem só para DDL/
+  TRUNCATE, reconstruída a partir dos deltas se chegar depois de DML).
+- **`compact_into` caía em scan.** `WHERE a = ? AND b = ? AND c = ? AND d = ?
+  AND janela >= ? AND janela < ?` sobre índice `(a,b,c,d,janela)` não casava
+  o planner (que exigia a chave inteira por igualdade). Agora: igualdades em
+  qualquer ordem formam o prefixo, faixa opcional na coluna seguinte, e o
+  seek vale também com `ORDER BY` (ordem do índice quando é a coluna
+  seguinte ASC; senão sort só do resultado), com agregação/GROUP BY (só o
+  WHERE dirige o seek) e com faixa em coluna fora do índice (filtro
+  residual). RAM, engine e snapshot; `EXPLAIN` mostra
+  `IndexSeek(prefix=[…], col: lower/upper)`.
+- Reprodução (`engine/bench/memory_ingest.py`, 120 chaves × 240 janelas,
+  131 MB, Mac): 0.3.1 = 395 MB no primeiro contato (3,0× o arquivo) e
+  0,44 s/lote; agora 206 MB (1,6×) plano desde o primeiro lote e 0,05 s/lote,
+  com asserção de que cada seek devolve as mesmas linhas que o scan.
+
+### Adicionado
+- **Teto de memória e observabilidade na `SharedConnection` (7.1)**:
+  `set_memory_budget(bytes)` — acima do teto, depois de cada escrita durável
+  (autocommit ou COMMIT), o cache de tabelas é descartado e a memória
+  devolvida ao SO (`malloc_trim` no glibc); nunca dentro de transação.
+  `memory_stats()` (total, por tabela, índices, cache de linhas) e
+  `release_memory()`. FFI: `tmjlite_set_memory_budget_shared`,
+  `tmjlite_memory_stats_shared` (JSON) + `tmjlite_string_free`,
+  `tmjlite_release_memory_shared`. Nos seis drivers.
+- **Modo estrito de streaming (7.2)**: `set_strict_streaming(true)` faz um
+  cursor cuja forma não streama (JOIN, DISTINCT, subquery, window function,
+  ORDER BY/LIMIT sobre agregação) falhar com o motivo em vez de materializar
+  em silêncio. FFI `tmjlite_set_strict_streaming_shared`; nos seis drivers.
+- Header documenta o contrato de memória (7.3/7.4): o que fica residente,
+  spill do sort a partir de 32k linhas, checkpoint adiado com cursor aberto
+  mas WAL só em disco.
+
 ## [0.3.1] - 2026-10-15
 
 Origem: dossiê do OOM em produção do tmjLens (2026-10-14/15) — "o formato do
@@ -177,7 +231,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.9...v0.3.0
 [0.2.9]: https://github.com/TMJacometti/TMJPlatform/compare/v0.2.8...v0.2.9

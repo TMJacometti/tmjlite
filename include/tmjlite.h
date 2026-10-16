@@ -158,6 +158,29 @@ TmjResult *tmjlite_stmt_query(TmjDb *db, const TmjStmt *stmt, const char *params
 int tmjlite_stmt_exec_shared(const TmjSharedDb *db, const TmjStmt *stmt, const char *params_json);
 TmjResult *tmjlite_stmt_query_shared(const TmjSharedDb *db, const TmjStmt *stmt, const char *params_json);
 
+/* ---- Memory: budget, stats, release (0.3.2+) ----
+ *
+ * A shared handle keeps every table it has WRITTEN to materialized in RAM
+ * (rows + indexes) — the engine file stays the source of truth, the cache
+ * makes repeated writes cheap. Reads via query/cursor do NOT populate it.
+ * Give it a budget to make the ceiling predictable: when the estimate
+ * exceeds the budget after a durable write (autocommit or COMMIT), the cache
+ * is dropped and memory returned to the OS (glibc: malloc_trim). The next
+ * write to a table reloads it.
+ *
+ * Also note: ORDER BY on a non-indexed column keeps up to 32k rows in memory
+ * before spilling to disk; WAL checkpoints are deferred while a cursor is
+ * open, but the WAL stays on disk (nothing accumulates in memory) and the
+ * fold happens at the first commit with no open cursor. */
+int   tmjlite_set_memory_budget_shared(const TmjSharedDb *db, uint64_t bytes);  /* 0 = off */
+char *tmjlite_memory_stats_shared(const TmjSharedDb *db);                        /* JSON; free with tmjlite_string_free */
+int   tmjlite_release_memory_shared(const TmjSharedDb *db);                      /* tables dropped, or 0 inside a txn */
+/* Strict streaming: a cursor whose shape cannot stream (JOIN, DISTINCT,
+ * subquery, window function, ORDER BY/LIMIT over aggregate) FAILS with the
+ * reason instead of silently materializing. */
+int   tmjlite_set_strict_streaming_shared(const TmjSharedDb *db, int on);
+void  tmjlite_string_free(char *s);
+
 /* ---- Cursor: one row at a time (0.3.1+) ----
  *
  * Reads straight from an MVCC snapshot of the shared handle without

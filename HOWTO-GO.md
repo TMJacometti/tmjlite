@@ -147,6 +147,25 @@ for cur.Next() {
 if err := cur.Err(); err != nil { return err }
 ```
 
+### Memória: teto, stats e modo estrito (0.3.2+)
+
+A `SharedConnection` mantém em RAM as tabelas em que **escreveu** (linhas +
+índices) para que escritas repetidas sejam baratas; leituras por
+`query`/`cursor` não entram nesse cache. Dê um teto para o limite ficar
+previsível: acima dele, depois de uma escrita durável (autocommit ou COMMIT),
+o cache é descartado e a memória devolvida ao SO; a próxima escrita recarrega
+a tabela. `memory_stats` mostra o que está residente; o modo estrito faz um
+cursor que não consegue streamar (JOIN, DISTINCT, subquery, window function,
+ORDER BY/LIMIT sobre agregação) falhar com o motivo em vez de materializar em
+silêncio.
+
+```go
+db.SetMemoryBudget(256 << 20)            // 256 MiB; 0 desliga
+st, _ := db.MemoryStats()                // st.TotalBytes, st.Rows, st.Tables[i].Name/Rows/Bytes
+db.ReleaseMemory()                       // descarta o cache agora (0 em transação)
+db.SetStrictStreaming(true)              // Cursor() não-streamável → erro com o motivo
+```
+
 ## ShadowConnection e branches — escrita multi-processo por merge (git-merge)
 
 ```go
