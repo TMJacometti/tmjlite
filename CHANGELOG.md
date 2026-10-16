@@ -11,6 +11,20 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-16
+
+Origem: report do loadTester de Thiago na 0.3.3 (2026-10-16): todas as
+leituras caíram para poucos ms, menos `SELECT WHERE ?`, `WHERE ? ORDER BY
+LIMIT` e `HASH login`, as três **preparadas** (300+ ms de média).
+
+### Corrigido
+- **Prepared SELECT/EXPLAIN na `SharedConnection` ainda passava pelo writer.**
+  `execute_prepared` pegava o lock do writer para qualquer statement; agora
+  SELECT e EXPLAIN preparados vão para o snapshot como os demais
+  (`PreparedStatement::is_read`). Prepared de escrita segue no writer.
+  Teste: prepared SELECT não espera transação alheia; p95 sob 8 escritores
+  em fsync < 20 ms.
+
 ## [0.3.4] - 2026-10-16
 
 Origem: `write-load --help` do loadTester de Thiago (2026-10-16) — "skips
@@ -298,7 +312,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.1...v0.3.2
