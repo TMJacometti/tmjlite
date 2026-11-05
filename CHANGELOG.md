@@ -11,6 +11,94 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-11-05
+
+Origem: backlog pós-0.3.5 (achados do harness de carga), itens 1–6.
+
+> **Aviso sobre a 0.3.6 em crates.io, npm e Maven Central:** esses três
+> pacotes saíram **sem a lib nativa de macOS** (só linux-x64 e windows-x64).
+> O build de macOS nunca começou durante o incidente do GitHub Actions de
+> 2026-11-04 e os jobs de publish rodavam com `if: always()`. PyPI e NuGet
+> 0.3.6 vieram do rerun completo e estão íntegros. A próxima release
+> substitui os três; a 0.3.6 é retirada de circulação (`cargo yank`,
+> `npm deprecate`; Maven é imutável).
+
+### Release / CI
+- Jobs de publish em npm, crates.io e Maven agora exigem `build` concluído
+  com sucesso nas três plataformas (a republicação por `workflow_dispatch`,
+  que não compila, continua permitida). Novo input `deprecate_version` no
+  dispatch: `cargo yank` + `npm deprecate` de uma versão publicada quebrada.
+- `scripts/sync-landing-artifacts.sh` também carimba a versão em
+  `drivers/csharp/TMJLite/TMJLite.csproj` (estava em 0.1.6; o CI passava
+  `-p:Version`, então o NuGet nunca saiu errado).
+- Exemplo `landing/examples/cadastro/rust` portado para o crate público
+  `tmjlite` (crates.io): prepared statements com `last_pk`, `IF NOT EXISTS`,
+  cursor em streaming, branches/merge e `conflicts()`. Antes dependia do SDK
+  interno removido.
+
+### Corrigido
+- **Subquery `IN`/`EXISTS`/escalar era O(N×M)** — a subquery rodava de novo
+  para cada linha externa, varrendo a tabela interna (8 s com 2k clientes ×
+  4k pedidos). Agora as referências ao escopo externo no WHERE da subquery
+  viram literais da linha corrente antes de executar (o planner interno
+  usa o índice: `customer_id = '<uuid>' AND status = 'open'` → seek), e o
+  resultado fica em cache por (subquery, valores ligados) durante o
+  statement: subquery não correlacionada roda uma vez e `IN` consulta um
+  conjunto. Semântica tri-valorada de `IN`/`NOT IN` com NULL preservada.
+  `engine/bench/subquery.py`, 2k × 4k: `IN` 7,9 s → 15 ms; `EXISTS` 8,2 s →
+  16 ms; escalar 88 → 12 ms; `NOT IN` 12 ms.
+- **Group commit na `SharedConnection`** — cada escrita autocommit (e cada
+  COMMIT de transação) pagava o próprio `F_FULLFSYNC` dentro do lock do
+  writer, serializando tudo: 90% do tempo do mix de 32 threads do loadTest.
+  Agora o commit é anotado no WAL (`Pager::commit_nosync` → `CommitTicket`),
+  o lock é solto e a thread espera a durabilidade fora dele; o primeiro a
+  esperar vira líder, aguarda uma janela de 1 ms quando há outros
+  escritores em voo e faz UM fsync que cobre todos os commits anotados. A
+  publicação para leitores acontece só depois do fsync, em ordem de época,
+  e cada escrita continua retornando apenas quando durável (teste de queda
+  de energia com o VFS simulado: commit anotado sem esperar não sobrevive,
+  esperado sobrevive). Quem escreve sozinho não paga a janela.
+  16 threads × 50 INSERTs autocommit (Rust, Mac): 3,2 s → 0,6 s, 802
+  commits em 108 fsyncs; mix Python de 32 threads: 285 → 407 ops/s, DML de
+  ~150 para ~90–120 ms de média (o `transaction_batch` ainda segura o lock
+  durante o corpo da transação). `group_commit_stats()` expõe
+  (fsyncs, commits). Autocommit de uma thread fica igual (INSERT 3–4 ms).
+
+- **Varredura reparseava a folha da B+tree a cada linha.** O cursor chamava
+  `read_leaf` (parse da página inteira, clonando chave e payload de todas as
+  células) em cada `next()`: O(células²) por folha. Agora a folha parseada
+  fica no cursor e cada célula é movida uma única vez. Vale para tudo que
+  varre: `COUNT(*)`, `GROUP BY`, cursores, joins materializados.
+  `engine/bench/scan_cost.py`, 50k linhas: `COUNT(*)` 107 → 27 ms (2,1 →
+  0,5 µs/linha); `GROUP BY` + agregações 114 → 29 ms; cursor de 1 coluna
+  168 → 86 ms (o resto é FFI por linha).
+
+- **`EXPLAIN` na `SharedConnection` materializava a tabela** para planejar
+  (~17 ms numa tabela de 10k linhas). O plano só depende do schema e dos
+  índices: o rascunho usa tabelas vazias e nada é lido do disco.
+- **Planner**: `WHERE k = ? AND n > ?` com índice só em `k` ia de scan (o
+  caminho prefixo + filtro residual exigia índice composto). Agora seek por
+  `k` e filtro em `n`, em RAM, engine e snapshot.
+
+### Adicionado
+- **Gate de performance e memória no CI** (`engine/bench/gate.py` +
+  `.github/workflows/perf-gate.yml`, roadmap 3.1): a cada push em `main`
+  que toque engine ou driver Python, Linux compila a lib em release e roda
+  13 cenários com limiares folgados (subqueries 2k×4k, varredura 50k,
+  leitores sob 8 escritores em fsync, vazão de escrita concorrente, lote
+  de 450 upserts, teto de memória). Falha = regressão catastrófica; os
+  números ficam no artifact `gate.json`. Mac (1,6 s): tudo 10–100× abaixo
+  do limiar.
+- **Teto do cache de páginas por snapshot configurável**:
+  `set_snapshot_cache_pages(n)` na `SharedConnection` (FFI
+  `tmjlite_set_snapshot_cache_pages_shared`; nos seis drivers). Cada cursor
+  ou query abre um snapshot com cache de até 2048 páginas de 4 KiB (8 MiB) —
+  com 32 leitores simultâneos eram ~256 MiB de RSS com o engine em 7 MiB.
+  Vale para snapshots abertos depois; 0 desliga; o resultado não muda.
+- CLI: `tmjlite --version` (e `-V`/`version`) imprime a versão; qualquer
+  outra flag desconhecida é erro de uso. Antes, o argumento virava nome de
+  banco e o CLI **criava** `--version` e `--version.lock` no diretório atual.
+
 ## [0.3.6] - 2026-11-04
 
 Origem: bootstrap do app .NET de Thiago (2026-11-04) — "não há CREATE TABLE
@@ -336,7 +424,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.3...v0.3.4

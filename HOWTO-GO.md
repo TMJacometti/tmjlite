@@ -172,6 +172,7 @@ db.SetMemoryBudget(256 << 20)            // 256 MiB; 0 desliga
 st, _ := db.MemoryStats()                // st.TotalBytes, st.Rows, st.Tables[i].Name/Rows/Bytes
 db.ReleaseMemory()                       // descarta o cache agora (0 em transação)
 db.SetStrictStreaming(true)              // Cursor() não-streamável → erro com o motivo
+db.SetSnapshotCachePages(512)            // cache por cursor/query (páginas de 4 KiB; padrão 2048 = 8 MiB)
 ```
 
 ## ShadowConnection e branches — escrita multi-processo por merge (git-merge)

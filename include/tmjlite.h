@@ -191,6 +191,10 @@ int   tmjlite_release_memory_shared(const TmjSharedDb *db);                     
  * subquery, window function, ORDER BY/LIMIT over aggregate) FAILS with the
  * reason instead of silently materializing. */
 int   tmjlite_set_strict_streaming_shared(const TmjSharedDb *db, int on);
+/* Page cache of each snapshot (cursor/query): pages of 4 KiB, default 2048
+ * (8 MiB per reader). N concurrent readers cost N x this in RSS — the knob
+ * for many-threaded services. 0 disables the cache. (0.3.7+) */
+int   tmjlite_set_snapshot_cache_pages_shared(const TmjSharedDb *db, uint64_t pages);
 void  tmjlite_string_free(char *s);
 
 /* ---- Cursor: one row at a time (0.3.1+) ----

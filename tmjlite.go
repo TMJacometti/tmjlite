@@ -776,6 +776,16 @@ func (c *SharedConnection) ReleaseMemory() (int, error) {
 	return n, nil
 }
 
+// SetSnapshotCachePages caps the page cache (4 KiB pages) of every snapshot
+// (cursor/query) opened from now on. Default 2048 (8 MiB per reader); N
+// concurrent readers cost N x this in RSS. 0 disables the cache.
+func (c *SharedConnection) SetSnapshotCachePages(pages uint64) error {
+	if C.tmjlite_set_snapshot_cache_pages_shared(c.db, C.uint64_t(pages)) != C.TMJLITE_OK {
+		return errFromShared(c.db)
+	}
+	return nil
+}
+
 // SetStrictStreaming makes Cursor fail (with the reason) for shapes that
 // cannot stream (JOIN, DISTINCT, subquery, window function, ORDER BY/LIMIT
 // over aggregate) instead of silently materializing.
