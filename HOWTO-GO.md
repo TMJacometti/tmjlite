@@ -133,6 +133,14 @@ rows, _ := sel.Query("ns3", "k1")
 
 `Prepare()` também existe na `Connection` clássica.
 
+### Bootstrap idempotente e a PK do INSERT (0.3.6+)
+
+```go
+db.Execute("CREATE TABLE IF NOT EXISTS clientes (id PK, nome TEXT, email TEXT);") // no-op se já existe
+r, err := db.Exec("INSERT INTO clientes (nome, email) VALUES ('Ana', 'ana@x');")
+fmt.Println(r.RowsAffected, r.LastPk) // 1 <uuid gerado>; LastPk vazio em multi-linha/UPDATE/DELETE
+```
+
 ### Cursor — leitura em streaming (0.3.1+)
 
 ```go

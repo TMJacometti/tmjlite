@@ -11,6 +11,30 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-11-04
+
+Origem: bootstrap do app .NET de Thiago (2026-11-04) — "não há CREATE TABLE
+IF NOT EXISTS" e "o driver C# não devolve o UUID do INSERT".
+
+### Adicionado
+- **`CREATE TABLE IF NOT EXISTS` e `CREATE [UNIQUE] INDEX IF NOT EXISTS`**:
+  objeto já existente (por nome, ou índice nas mesmas colunas) vira no-op com
+  a mensagem `… already exists (IF NOT EXISTS: nothing done).` em vez de
+  erro — bootstrap idempotente, inclusive em reabertura a frio.
+- **Resultado estruturado de escrita**: `execute()` (e `execute` de prepared)
+  nos seis drivers agora devolve `ExecResult` com `rows_affected`, `last_pk`
+  (o UUID gerado por um INSERT de UMA linha em tabela com coluna `PK`; vazio
+  em multi-linha/UPDATE/DELETE/DDL) e `message`. Nada de parsear
+  `"Inserted 1 row … PK: …"`. FFI: `tmjlite_result_rows_affected` e
+  `tmjlite_result_last_pk` no `TmjResult` de `tmjlite_query[_shared]` /
+  `tmjlite_stmt_query[_shared]`. Por driver: C# `ExecResult Execute(…)`
+  (`RowsAffected`, `LastPk`, `Message`); Python `ExecResult`
+  (`rows_affected`, `last_pk`); Node `{ rowsAffected, lastPk, message }`;
+  Java `ExecResult execute(…)` (`getLastPk()`); Go `Exec(sql)` /
+  `PreparedStatement.ExecResult(…)` (`Execute`/`Exec` com erro só
+  continuam); Rust `ExecResult { rows_affected, last_pk, message }`.
+  Compatível: quem ignorava o retorno `void` continua compilando.
+
 ## [0.3.5] - 2026-10-16
 
 Origem: report do loadTester de Thiago na 0.3.3 (2026-10-16): todas as
@@ -312,7 +336,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.2...v0.3.3

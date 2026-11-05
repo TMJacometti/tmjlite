@@ -87,6 +87,16 @@ int tmjlite_result_bool(const TmjResult *result, int row, int col, int *out);
  * The returned pointer is valid until tmjlite_result_free(). */
 const char *tmjlite_result_message(const TmjResult *result);
 
+/* Structured outcome of a write (0.3.6+) — run INSERT/UPDATE/DELETE through
+ * tmjlite_query() / tmjlite_query_shared() / tmjlite_stmt_query*() instead of
+ * the exec variants when you need it:
+ *   rows_affected: rows inserted/updated/deleted/upserted (0 for SELECT/DDL).
+ *   last_pk:       the UUID generated for a single-row INSERT into a table with
+ *                  a PK column; NULL otherwise (multi-row INSERT, UPDATE, …).
+ *                  Borrowed: valid until tmjlite_result_free(). */
+int64_t     tmjlite_result_rows_affected(const TmjResult *result);
+const char *tmjlite_result_last_pk(const TmjResult *result);
+
 /* Free a result returned by tmjlite_query(). */
 void tmjlite_result_free(TmjResult *result);
 
