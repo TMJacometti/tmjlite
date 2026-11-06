@@ -11,6 +11,91 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-11-06
+
+Origem: dossiê de ajustes do loadTest (bench de 05/11/2026, rodado na 0.3.5) —
+itens P5, P2, P3, P4; o P1 (group commit) já saiu na 0.3.7.
+
+### Corrigido / desempenho
+- **Custo de escrita que crescia com a tabela (P2)** — no `data_scale` do
+  harness o seed ia de 95 → 142 → 197 µs por cliente (1k → 50k). Perfil
+  (`sample` no caminho de pedidos): 44% fsync (ticket, WAL, checkpoint e
+  **fsync de diretório** ao recriar o WAL), 35% checkpoint reescrevendo páginas
+  uma a uma, 16% SHA-256 por frame, 11% inserção nos índices. Com chave
+  aleatória (UUID de cliente no índice de pedidos) cada commit suja uma página
+  por linha por índice; o checkpoint a cada 4 MiB virava custo fixo por commit.
+  Mudanças no pager (**WAL v2**, arquivos existentes continuam válidos):
+  - frames com **CRC-32 + salt de geração** em vez de SHA-256 (`crc32fast`,
+    instruções da CPU; mesmo polinômio do checksum de página, cuja implementação
+    bit a bit também foi trocada — valores idênticos, ver teste);
+  - checkpoint **trunca e reaproveita** o WAL (salt novo) em vez de apagar e
+    recriar: sem fsync de diretório por ciclo; frames da geração anterior que
+    sobrevivam a uma queda são ignorados pelo salt (teste
+    `frames_from_previous_wal_generation_are_ignored`); WAL v1 deixado por
+    versão anterior ainda é recuperado (`recovers_legacy_v1_wal`);
+  - limite de checkpoint 4 → **16 MiB** e páginas contíguas gravadas numa
+    escrita só; o fold roda fora do lock dos leitores (só a troca de índice +
+    reset é atômica);
+  - recuperação: frame ilegível é rabo torto (para no último commit inteiro),
+    inclusive o primeiro frame de uma geração reaproveitada.
+  Resultado (`engine/bench/data_scale.py`, réplica do harness): seed **plano**
+  em 115 / 104 / 119 µs por cliente; pedidos 41 → 93 µs/linha virou 35 → 42.
+- **`SELECT COUNT(*) FROM t` em O(1) (P3)** — contador de linhas versionado no
+  catálogo (`CatalogEntry.row_count`), mantido em INSERT/DELETE/TRUNCATE e
+  gravado com o commit; o handle compartilhado responde do catálogo do
+  snapshot sem ler página de dados. 50k linhas: 29,9 → 0,03 ms. Catálogos
+  antigos (sem o campo) caem na varredura até a primeira reescrita da tabela.
+- **Planner: igualdade fora do índice vira filtro residual** —
+  `WHERE city = ? AND active = TRUE` com índice só em `city` fazia
+  `TableScan`; agora `IndexSeek(city) → Filter → Limit`.
+- **Faixas de índice lidas sob demanda no snapshot** — o seek materializava
+  todos os rowids da faixa (10k da cidade) antes do `LIMIT`; agora lê em
+  pedaços (64 → 2048) conforme a cauda puxa.
+- **B+tree sem cópia de página no caminho quente** — `descend_to_leaf` lia cada
+  página duas vezes (tipo + nó) copiando 4 KiB e parseando o nó inteiro com
+  uma alocação por célula; `get` parseava a folha toda. Novo
+  `PageRead::with_page` empresta a página do cache e a descida/lookup leem os
+  bytes crus. No snapshot de 50k: 10k linhas via índice 387 → 67 ms,
+  `COUNT(*) … WHERE city = ?` 368 → 46 ms, `LIMIT 50` via índice 4,4 → 1,6 ms;
+  subqueries do gate 15 → 5 ms.
+
+### Adicionado
+- **Estatísticas do group commit nos drivers (P4)**: `tmjlite_group_commit_stats_shared`
+  na FFI e `group_commit_stats()` / `groupCommitStats()` / `GroupCommitStats()`
+  nos seis drivers — `(fsyncs, commits)` desde a abertura; razão < 1 = escritores
+  concorrentes coalescidos. Permite ao harness separar espera por fsync de
+  tempo de execução no cenário `isolation`.
+
+### Testes
+- **`tests/crash_kill9.rs`** (P5): durabilidade com processo real morto por
+  `kill -9`. O binário de teste reexecuta como filho com 4 escritores via
+  `SharedDb` (autocommit e transações de 3 statements), imprime o id de cada
+  commit **depois** do retorno; o pai mata num instante determinístico por
+  repetição, reabre (recuperação do WAL) e exige faltando = 0 e nenhuma
+  transação pela metade. 8 repetições no CI; `TMJ_KILL9_REPS=50` para a
+  rodada longa (50 reps, 7.475 commits confirmados, 0 faltando, 0 parciais).
+
+### TMJStudio reescrito em Rust nativo (egui)
+- O Studio deixou de ser Tauri 2 + React/Vite/CodeMirror e virou um binário
+  único **Rust + eframe/egui 0.37** (`studio/`, crate `tmjstudio` no
+  workspace), dependendo do engine por path: sem FFI, webview ou npm. Tema
+  próprio (azul-noite, ciano e menta), fontes Outfit e JetBrains Mono embutidas.
+- Paridade com o Studio anterior: explorer com menu de contexto, editor com
+  abas/highlight/histórico, grid virtualizado com ordenação, filtro, edição
+  por duplo clique e exclusão, EXPLAIN com dicas, painel git-native completo
+  (branches, commit, log, merge com dry-run e conflitos), snapshot mode,
+  importação CSV, detecção de escrita externa. Toda operação no banco roda
+  em thread de trabalho — a janela não congela em SELECT grande ou import.
+- **Removido**: suporte a SQLite (abrir `.db`, importar SQLite → `.tmjp`). O
+  trait `DbBackend` fica como costura para plugins de outros engines (v2).
+- **Autocomplete no editor**: tabelas, colunas (com `alias.` resolvido pelo
+  FROM/JOIN da aba) e palavras-chave; ↑↓ navega, Tab/Enter aceita, Esc fecha.
+- Empacotamento próprio: `scripts/bundle-studio.sh` gera `.app`/`.dmg`
+  (assinado com Developer ID; notarização no CI), `.tar.gz` (Linux) e `.zip`
+  (Windows). `studio-release.yml` reescrito; nomes de asset
+  `TMJStudio_<ver>_<label>.<ext>` (manifest da landing reconhece os dois
+  formatos).
+
 ## [0.3.7] - 2026-11-05
 
 Origem: backlog pós-0.3.5 (achados do harness de carga), itens 1–6.
@@ -424,7 +509,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.7...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.8...HEAD
+[0.3.8]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.4...v0.3.5

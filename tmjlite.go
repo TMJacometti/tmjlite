@@ -786,6 +786,17 @@ func (c *SharedConnection) SetSnapshotCachePages(pages uint64) error {
 	return nil
 }
 
+// GroupCommitStats returns (fsyncs, commits) since open. fsyncs/commits < 1
+// means concurrent writers are being coalesced into one fsync; ~1 means
+// serial writes (one fsync per commit).
+func (c *SharedConnection) GroupCommitStats() (fsyncs, commits uint64, err error) {
+	var f, n C.uint64_t
+	if C.tmjlite_group_commit_stats_shared(c.db, &f, &n) != C.TMJLITE_OK {
+		return 0, 0, errFromShared(c.db)
+	}
+	return uint64(f), uint64(n), nil
+}
+
 // SetStrictStreaming makes Cursor fail (with the reason) for shapes that
 // cannot stream (JOIN, DISTINCT, subquery, window function, ORDER BY/LIMIT
 // over aggregate) instead of silently materializing.

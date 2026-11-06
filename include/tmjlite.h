@@ -195,6 +195,10 @@ int   tmjlite_set_strict_streaming_shared(const TmjSharedDb *db, int on);
  * (8 MiB per reader). N concurrent readers cost N x this in RSS — the knob
  * for many-threaded services. 0 disables the cache. (0.3.7+) */
 int   tmjlite_set_snapshot_cache_pages_shared(const TmjSharedDb *db, uint64_t pages);
+/* Group commit counters since open: fsyncs performed and commits appended to
+ * the WAL. fsyncs/commits < 1 means concurrent writers are being coalesced
+ * into one fsync; ~1 means serial writes. NULL out-pointers are skipped. (0.3.8+) */
+int   tmjlite_group_commit_stats_shared(const TmjSharedDb *db, uint64_t *fsyncs, uint64_t *commits);
 void  tmjlite_string_free(char *s);
 
 /* ---- Cursor: one row at a time (0.3.1+) ----

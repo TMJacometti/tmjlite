@@ -173,6 +173,7 @@ st, _ := db.MemoryStats()                // st.TotalBytes, st.Rows, st.Tables[i]
 db.ReleaseMemory()                       // descarta o cache agora (0 em transação)
 db.SetStrictStreaming(true)              // Cursor() não-streamável → erro com o motivo
 db.SetSnapshotCachePages(512)            // cache por cursor/query (páginas de 4 KiB; padrão 2048 = 8 MiB)
+fsyncs, commits, _ := db.GroupCommitStats() // razão < 1 = group commit coalescendo escritores
 ```
 
 ## ShadowConnection e branches — escrita multi-processo por merge (git-merge)
