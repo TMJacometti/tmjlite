@@ -11,6 +11,28 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-11-06
+
+Origem: dossiê do loadTest, resultado pós-0.3.8 (P1 "escrita serializada: sem
+mudança", 98 writes/s) — a causa era CPU dentro do lock, não fsync.
+
+### Corrigido / desempenho
+- **Argon2 das colunas `HASH` fora do lock do writer (P1)** — o hash
+  (argon2id OWASP, ~11 ms de CPU por valor) era calculado DEPOIS de pegar o
+  lock global de escrita: enquanto uma thread hasheava, as outras esperavam,
+  e o group commit nunca coalescia (fsyncs/commits = 1). Agora
+  `SharedConnection` pré-hasheia os literais de colunas HASH antes do lock —
+  INSERT (valores e `ON CONFLICT DO UPDATE SET`), UPDATE (atribuições e
+  WHERE), DELETE (WHERE), inclusive INSERT/UPDATE preparados — com o schema
+  vindo do snapshot (cache por tabela, limpo em DDL). O executor reconhece
+  valores já em PHC `$argon2id$` e não hasheia de novo; formato gravado,
+  `hash_login` e arquivos existentes não mudam. Bench (`INSERT` com senha,
+  M5 10 núcleos): 8 threads **97,5 → 356 writes/s**, 32 threads 373/s
+  (fsyncs/commits 0,64 — o group commit voltou a trabalhar); com 16 leitores
+  concorrentes 90 → 286/s. 1 thread: igual (71/s; o argon2 é o custo).
+  Sem coluna HASH nada muda (1.520/s com 8 threads).
+- `gate.py`: cenário novo "escritas/s com 8 threads e coluna HASH" (mín. 150).
+
 ## [0.3.8] - 2026-11-06
 
 Origem: dossiê de ajustes do loadTest (bench de 05/11/2026, rodado na 0.3.5) —
@@ -509,7 +531,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.8...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.9...HEAD
+[0.3.9]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.5...v0.3.6
