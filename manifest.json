@@ -44,49 +44,37 @@
     "prefix": "tmjlite-cli"
   },
   "studio": {
-    "version": "0.2.8",
+    "version": "0.3.7",
     "prefix": "tmjstudio",
-    "desc": "IDE nativa para TMJLite: explorer, editor SQL com abas e histórico, grid editável paginado, EXPLAIN, mock data, índices, export CSV/JSON. Painel git-native: branches, commit, log e merge com dry-run e conflitos lado a lado. Abre SQLite e importa CSV/SQLite para .tmjp.",
+    "desc": "IDE nativa para TMJLite, 100% Rust: explorer, editor SQL com autocomplete e abas, grid editável, EXPLAIN, mock data, índices, import CSV e export CSV/JSON. Painel git-native: branches, commit, log e merge com conflitos lado a lado.",
     "note": "macOS: assinado com Developer ID e notarizado pela Apple — abre sem avisos.",
     "files": {
       "linux-x64": [
         {
-          "file": "TMJStudio-0.2.8-1.x86_64.rpm",
-          "label": "↓ .rpm"
-        },
-        {
-          "file": "TMJStudio_0.2.8_amd64.AppImage",
-          "label": "↓ AppImage"
-        },
-        {
-          "file": "TMJStudio_0.2.8_amd64.deb",
-          "label": "↓ .deb"
+          "file": "TMJStudio_0.3.7_linux-x64.tar.gz",
+          "label": "↓ .tar.gz"
         }
       ],
       "macos-arm64": [
         {
-          "file": "TMJStudio_0.2.8_aarch64.dmg",
+          "file": "TMJStudio_0.3.7_macos-arm64.dmg",
           "label": "↓ .dmg (Apple Silicon)"
-        }
-      ],
-      "windows-x64": [
-        {
-          "file": "TMJStudio_0.2.8_x64-setup.exe",
-          "label": "↓ Setup .exe"
-        },
-        {
-          "file": "TMJStudio_0.2.8_x64_en-US.msi",
-          "label": "↓ .msi"
         }
       ],
       "macos-x64": [
         {
-          "file": "TMJStudio_0.2.8_x64.dmg",
+          "file": "TMJStudio_0.3.7_macos-x64.dmg",
           "label": "↓ .dmg (Intel)"
+        }
+      ],
+      "windows-x64": [
+        {
+          "file": "TMJStudio_0.3.7_windows-x64.zip",
+          "label": "↓ .zip"
         }
       ]
     },
-    "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/studio-v0.2.8"
+    "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/studio-v0.3.7"
   },
   "drivers": [
     {
