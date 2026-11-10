@@ -212,7 +212,11 @@ void  tmjlite_string_free(char *s);
  * API — tmjlite_cursor_is_streaming() tells which.
  *
  * Inside a BEGIN transaction on the calling thread the cursor sees that
- * transaction's writes. Outside, it holds a consistent snapshot: rows
+ * transaction's writes and streams the same way (0.4.0+; before it was always
+ * materialized, is_streaming = 0). Such a cursor is valid until COMMIT/ROLLBACK:
+ * stepping it afterwards is an error; rows inserted after open are not visited.
+ * Strict mode applies equally inside and outside a transaction.
+ * Outside, it holds a consistent snapshot: rows
  * committed by other threads after open are NOT visible. While a cursor is
  * open, WAL checkpoints are deferred — close it as soon as you are done.
  *

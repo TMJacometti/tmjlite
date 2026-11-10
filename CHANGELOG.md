@@ -11,6 +11,27 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-10
+
+### Corrigido
+- **Cursor aberto dentro de transação não streamava** (relatório do tmjLens,
+  2026-11-10; afetava 0.3.1–0.3.9). Com a thread em `BEGIN`, `cursor()`
+  executava o SELECT pelo executor da transação e devolvia o resultado inteiro
+  materializado, `is_streaming = 0` — mesmo num walk de 12 linhas por índice.
+  E o modo estrito não valia ali (passava com a flag em 0, enquanto fora da
+  transação uma forma não streamável falhava): dois contratos para o mesmo
+  conceito. No tmjLens 0.7.4 isso derrubou todo `POST /api/ingest/rollups`
+  desde 16/10. Agora o cursor em transação **streama da visão da própria
+  transação**: o planejamento é o mesmo do snapshot (`plan_streaming`), só a
+  lista de rowids candidatos é montada na abertura (seek por índice quando há)
+  e cada linha é buscada no passo — do overlay em RAM, com as escritas não
+  commitadas, ou do engine para tabelas intocadas. Contrato único: forma
+  streamável streama dentro e fora; forma não streamável materializa, ou falha
+  em modo estrito, dentro e fora. O cursor vale até o COMMIT/ROLLBACK (avançar
+  depois é erro, e não lê a transação seguinte); linhas inseridas depois da
+  abertura não entram na iteração, apagadas são puladas. Sem mudança na FFI
+  nem nos drivers.
+
 ## [0.3.9] - 2026-11-06
 
 Origem: dossiê do loadTest, resultado pós-0.3.8 (P1 "escrita serializada: sem
@@ -31,7 +52,7 @@ mudança", 98 writes/s) — a causa era CPU dentro do lock, não fsync.
   (fsyncs/commits 0,64 — o group commit voltou a trabalhar); com 16 leitores
   concorrentes 90 → 286/s. 1 thread: igual (71/s; o argon2 é o custo).
   Sem coluna HASH nada muda (1.520/s com 8 threads).
-- `gate.py`: cenário novo "escritas/s com 8 threads e coluna HASH" (mín. 150).
+- `gate.py`: cenário novo — razão de paralelismo da escrita com coluna HASH (8 threads ÷ 1; mín. 1,5; com o hash dentro do lock dá ~1,0).
 
 ## [0.3.8] - 2026-11-06
 
@@ -531,7 +552,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.9...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.9...v0.4.0
 [0.3.9]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.7...v0.3.8
 [0.3.7]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.6...v0.3.7
