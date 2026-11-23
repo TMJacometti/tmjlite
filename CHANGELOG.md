@@ -11,6 +11,130 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-23
+
+### Adicionado
+- **Chaves estrangeiras** (`REFERENCES` / `FOREIGN KEY`). Até aqui o
+  relacionamento era uma coluna `STRING(36)` com o UUID do pai e a integridade
+  ficava por conta da aplicação (com corrida entre o "pai existe?" e o
+  INSERT). Agora o engine garante:
+  - `coluna TEXT|STRING(36+) REFERENCES pai [ON DELETE RESTRICT | NO ACTION |
+    CASCADE | SET NULL]`, também na forma de tabela `FOREIGN KEY (col)
+    REFERENCES pai (pk)`. A FK aponta sempre para a `PK` do pai, uma coluna
+    só; auto-referência é aceita. Sem `ON UPDATE` (a PK é imutável).
+  - INSERT / UPDATE / upsert no filho exigem o pai; `DELETE` no pai aplica a
+    ação — planejado inteiro antes de tocar qualquer linha (statement
+    atômico, cascata multi-nível, desfeita por `ROLLBACK`); `DROP TABLE` /
+    `TRUNCATE` do pai são recusados enquanto houver filho.
+  - `ALTER TABLE t ADD FOREIGN KEY (col) REFERENCES pai …` em tabela já
+    populada (valida as linhas existentes e diz quantas estão órfãs) e
+    `ALTER TABLE t DROP FOREIGN KEY col`; `ADD COLUMN … REFERENCES`;
+    `MODIFY COLUMN` preserva a FK.
+  - Sessões shadow / branches: as FKs valem dentro da sessão, a cascata vira
+    ops no oplog, e o merge revalida o estado final contra o main — recusa
+    (`merge conflict: foreign key …`) em vez de criar órfão.
+  - A FK mora no catálogo do `.tmjp` (campo novo, opcional, na coluna).
+    `.schema` e o DDL do Studio mostram o `REFERENCES`. As palavras novas não são reservadas (`key`, `foreign` etc.
+    continuam nomes de coluna válidos). Sem mudança na FFI nem nos drivers.
+  - O engine não cria índice na coluna da FK: crie um (`CREATE INDEX`) para o
+    `DELETE` do pai achar os filhos por seek em vez de varrer a tabela filha.
+- **Índice de PK no arquivo.** Toda tabela ganha um índice automático na
+  coluna `PK`, gravado junto com os dados (UUID em 16 bytes, não nos 36 do
+  texto). Até aqui o índice de PK existia só em RAM, depois de a tabela ser
+  carregada por uma escrita: num arquivo recém-aberto e nas leituras em
+  snapshot da conexão compartilhada, `WHERE id = ?` **varria a tabela
+  inteira**. Agora é uma descida na B+tree em qualquer conexão (num teste com
+  5 mil linhas: até 8 páginas lidas, contra mais de 100 da varredura). Custo:
+  35 a 47 bytes por linha em cada tabela e ~4% no tempo de INSERT em
+  autocommit (a PK é aleatória: uma página a mais por INSERT).
+- **`ORDER BY … DESC LIMIT n`, `MAX()` e `MIN()` pelo índice.** A B+tree
+  ganhou varredura reversa. `ORDER BY col DESC LIMIT n` lê só as `n` últimas
+  entradas (`IndexSeek(…, order=desc)`), inclusive com prefixo de índice
+  composto (`WHERE a = ? ORDER BY b DESC LIMIT n` num índice `(a, b)`) e com
+  intervalo na mesma coluna. `SELECT MAX(c), MIN(c) FROM t [WHERE a = ?]` vira
+  uma descida por agregação, sem ler a tabela (`IndexMinMax`). Com dois
+  índices servindo ao `WHERE`, o planner agora prefere o que já entrega na
+  ordem pedida.
+- **JOIN lendo só as linhas necessárias.** Quando o `WHERE` tem condição
+  indexada só sobre a tabela do `FROM` e cada `JOIN` (`INNER`/`LEFT`, `ON` de
+  igualdade) chega numa coluna indexada (a PK sempre é), a base vem por seek
+  e cada tabela juntada tem só as chaves encontradas buscadas no índice
+  (`IndexLookupJoin`). Na conexão compartilhada, todo JOIN carregava as
+  tabelas inteiras do snapshot a cada consulta; num teste de 3 tabelas
+  (12 mil linhas) um JOIN pontual lê 9 páginas e um de 40 pedidos vizinhos
+  lê 17, contra 296 do JOIN inteiro. Fora dessas condições nada muda.
+- **`VACUUM`**: reescreve o banco num arquivo novo e compacto e troca pelo
+  atual (o arquivo nunca encolhia: `DELETE`/`DROP TABLE` só devolviam páginas
+  à lista de livres). Arquivo novo gravado e sincronizado por inteiro antes de
+  um `rename` atômico; exige conexão exclusiva, fora de transação (a conexão
+  compartilhada recusa com explicação). Num teste que apaga 90% das linhas e
+  uma tabela inteira: 3,5 MB → 205 KB.
+- **Formato de arquivo v3**, com atualização automática na primeira abertura
+  de um arquivo ≤ 0.4.0: completa os índices com as linhas NULL (ver
+  *Corrigido*) e cria o índice de PK de cada tabela — uma leitura de cada
+  tabela, um commit só, idempotente. **Sem volta**: a versão do arquivo sobe
+  de 2 para 3 e um engine ≤ 0.4.0 passa a recusá-lo (`unsupported page file
+  version: 3`) em vez de devolver resultado errado ou deixar entradas órfãs
+  nos índices. Atualizar CLI, drivers e Studio juntos.
+- **TMJStudio: diagrama de tabelas e chaves estrangeiras** (botão *Diagrama*).
+  Uma caixa por tabela, uma linha por FK. Arrastar uma coluna até outra tabela
+  cria a FK (nos dois sentidos: coluna da filha → pai, ou PK do pai → coluna da
+  filha; soltar a PK no cabeçalho da filha cria a coluna junto); um diálogo
+  mostra o SQL e o `ON DELETE` antes de executar. Clicar numa linha edita ou
+  remove a FK. Só leitura em branch/snapshot. Erros de FK ganharam mensagem
+  amigável e o plano do `EXPLAIN` descreve `IndexMinMax`, `IndexLookupJoin` e
+  `order=desc`.
+- **Apelido de coluna**: `SELECT COUNT(*) AS total`, `SELECT col AS nome` —
+  antes era erro de parse. O apelido vira o nome da coluna de saída (em todos
+  os caminhos: executor, snapshot, cursor, atalho do `COUNT(*)`) e pode ser
+  usado em `ORDER BY` e `GROUP BY`. O `AS` é obrigatório.
+- FFI: `tmjlite_result_type` e `tmjlite_cursor_type` devolvem o tipo que o
+  engine guardou no valor (0 NULL, 1 INT, 2 FLOAT, 3 BOOL, 4 TEXT, 5 UUID,
+  6 DATE, 7 DATETIME). Só adição — a ABI existente não muda.
+
+### Corrigido
+- **Índices não guardavam linhas com NULL — duas consultas davam resultado
+  errado** (existia desde os índices compostos). (1) Seek por prefixo:
+  `WHERE a = 1` usando um índice `(a, b)` não devolvia as linhas com
+  `b IS NULL`. (2) `ORDER BY col LIMIT n` atendido pelo índice não devolvia as
+  linhas com `col IS NULL` — o mesmo `SELECT` sem `LIMIT` devolvia. Agora toda
+  linha tem entrada em todo índice (NULL ordena antes de qualquer valor):
+  o seek por prefixo é completo e a ordem do índice é a mesma do sort (NULL
+  primeiro no ASC, por último no DESC). Intervalos e igualdades continuam
+  nunca casando com NULL, e `UNIQUE` continua aceitando vários NULL. Arquivos
+  existentes são corrigidos na primeira abertura (formato v3).
+- `ALTER TABLE … ADD/DROP COLUMN` não reposicionava as colunas dos índices no
+  engine (as posições antigas valiam até reabrir o arquivo).
+- **Drivers devolviam texto só de dígitos como número** (Python, Node, Go, C#,
+  Java e Rust). O tipo de cada célula era *adivinhado pelo texto*: numa coluna
+  `TEXT`/`STRING`, `'593'` voltava `593` e `'007'` voltava `7` (zero à esquerda
+  perdido); `'true'` virava booleano, `'1e5'` virava float, o texto `'NULL'`
+  virava nulo, e um `FLOAT` `2.0` voltava inteiro. Agora o driver pergunta o
+  tipo ao engine (`tmjlite_*_type`) em `query()`, prepared e cursor.
+  **Muda o que a aplicação recebe**: quem dependia da conversão implícita de
+  uma coluna de texto para número passa a receber `str`/`string` — o tipo
+  declarado na coluna. `PK`, `DATE` e `DATETIME` continuam texto. Exige a lib
+  nativa desta versão (os drivers já a trazem embutida).
+- **`SUM` de coluna `INT` devolvia `FLOAT`** (somava em `f64`, com perda acima
+  de 2^53). Agora a soma de inteiros é exata e devolve `INT`; com `FLOAT` no
+  meio (ou estouro de `i64`) devolve `FLOAT`. Vale para o `SUM` agregado e o
+  `SUM(...) OVER`. `AVG` continua `FLOAT`.
+- **`WHERE fk = ? ORDER BY outra_coluna LIMIT n` varria a tabela.** Quando a
+  coluna do `ORDER BY` também tinha índice, o planejador tentava o atalho
+  "índice já entrega em ordem", via que o `WHERE` era em outra coluna e
+  desistia de *qualquer* seek — plano `TableScan → Filter → ExternalSort`.
+  Agora segue para o seek pelo índice do `WHERE` e ordena só as linhas que
+  sobraram (`IndexSeek → ExternalSort → Limit`). Mesmo plano no executor, no
+  snapshot e no cursor.
+- **Arquivo ~2x maior em autocommit do que em transação** (≈416 vs ≈221
+  bytes/linha no mesmo dado). O split da B+tree era sempre ao meio; com chaves
+  crescentes (o rowid de todo INSERT) cada folha ficava pela metade para
+  sempre. Agora a inserção no fim da última folha faz *split de append* (a
+  folha cheia fica cheia, a célula nova abre a seguinte), também nos nós
+  internos. Autocommit passa a ocupar o mesmo que o lote. Sem mudança de
+  formato: arquivos existentes abrem igual e passam a crescer mais devagar
+  (as páginas já pela metade não são recompactadas).
+
 ## [0.4.0] - 2026-11-10
 
 ### Corrigido
@@ -552,7 +676,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.9...v0.4.0
 [0.3.9]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.8...v0.3.9
 [0.3.8]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.7...v0.3.8

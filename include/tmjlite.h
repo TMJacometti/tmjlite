@@ -78,6 +78,10 @@ const char *tmjlite_result_value(const TmjResult *result, int row, int col);
  * i64/f64/bool: 0 = ok (written to *out), -1 = not convertible / out of
  * bounds. INT/FLOAT/BOOL columns convert directly; TEXT is parsed. */
 int tmjlite_result_is_null(const TmjResult *result, int row, int col);
+/* Stored type of the value (0.4.1+): 0 NULL, 1 INT, 2 FLOAT, 3 BOOL, 4 TEXT,
+ * 5 UUID (PK), 6 DATE, 7 DATETIME; -1 = out of bounds. Drivers must use this
+ * instead of guessing from the text: a TEXT cell holding '007' is text. */
+int tmjlite_result_type(const TmjResult *result, int row, int col);
 int tmjlite_result_i64(const TmjResult *result, int row, int col, int64_t *out);
 int tmjlite_result_f64(const TmjResult *result, int row, int col, double *out);
 int tmjlite_result_bool(const TmjResult *result, int row, int col, int *out);
@@ -239,6 +243,8 @@ const char *tmjlite_cursor_column_name(const TmjCursor *c, int col);
  * string "NULL" — use tmjlite_cursor_is_null. */
 const char *tmjlite_cursor_text(const TmjCursor *c, int col);
 int tmjlite_cursor_is_null(const TmjCursor *c, int col);
+/* Stored type of the current row's value — same tags as tmjlite_result_type. */
+int tmjlite_cursor_type(const TmjCursor *c, int col);
 int tmjlite_cursor_i64(const TmjCursor *c, int col, int64_t *out);
 int tmjlite_cursor_f64(const TmjCursor *c, int col, double *out);
 int tmjlite_cursor_bool(const TmjCursor *c, int col, int *out);

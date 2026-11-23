@@ -218,29 +218,27 @@ func (c *Connection) Execute(sql string) error {
 	return nil
 }
 
-// parseValue converts a C result string into a typed Go value.
-// "NULL" -> nil, "true"/"false" -> bool, integers -> int64, floats -> float64, else string.
-func parseValue(s string) interface{} {
-	if s == "NULL" {
+// typedValue builds the Go value for a cell from the type the ENGINE stored
+// (tmjlite_result_type / tmjlite_cursor_type) and the cell text. The type is
+// never guessed from the text: a TEXT column holding "593" or "007" comes
+// back as a string (it used to become int64 and lose the leading zero).
+// Tags: 0 NULL -> nil, 1 INT -> int64, 2 FLOAT -> float64, 3 BOOL -> bool;
+// everything else (TEXT, PK/UUID, DATE, DATETIME) -> string.
+func typedValue(tag int, s string) interface{} {
+	switch tag {
+	case 0:
 		return nil
+	case 1:
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return n
+		}
+	case 2:
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return f
+		}
+	case 3:
+		return s == "true"
 	}
-
-	lower := strings.ToLower(s)
-	if lower == "true" {
-		return true
-	}
-	if lower == "false" {
-		return false
-	}
-
-	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return n
-	}
-
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f
-	}
-
 	return s
 }
 
@@ -272,7 +270,7 @@ func (c *Connection) Query(sql string) (*QueryResult, error) {
 		for col := 0; col < colCount; col++ {
 			cVal := C.tmjlite_result_value(result, C.int(r), C.int(col))
 			if cVal != nil {
-				values[col] = parseValue(C.GoString(cVal))
+				values[col] = typedValue(int(C.tmjlite_result_type(result, C.int(r), C.int(col))), C.GoString(cVal))
 			}
 		}
 		rows[r] = Row{
@@ -422,7 +420,7 @@ func (c *SharedConnection) Query(sql string) (*QueryResult, error) {
 		for col := 0; col < colCount; col++ {
 			cVal := C.tmjlite_result_value(result, C.int(r), C.int(col))
 			if cVal != nil {
-				values[col] = parseValue(C.GoString(cVal))
+				values[col] = typedValue(int(C.tmjlite_result_type(result, C.int(r), C.int(col))), C.GoString(cVal))
 			}
 		}
 		rows[r] = Row{columns: columns, values: values}
@@ -667,7 +665,7 @@ func readResult(result *C.TmjResult) *QueryResult {
 		values := make([]interface{}, colCount)
 		for col := 0; col < colCount; col++ {
 			if cVal := C.tmjlite_result_value(result, C.int(r), C.int(col)); cVal != nil {
-				values[col] = parseValue(C.GoString(cVal))
+				values[col] = typedValue(int(C.tmjlite_result_type(result, C.int(r), C.int(col))), C.GoString(cVal))
 			}
 		}
 		rows[r] = Row{columns: columns, values: values}
@@ -995,7 +993,7 @@ func (cu *Cursor) Next() bool {
 			continue
 		}
 		if t := C.tmjlite_cursor_text(cu.c, C.int(i)); t != nil {
-			values[i] = parseValue(C.GoString(t))
+			values[i] = typedValue(int(C.tmjlite_cursor_type(cu.c, C.int(i))), C.GoString(t))
 		}
 	}
 	cu.row = Row{columns: cu.columns, values: values}
