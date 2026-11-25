@@ -11,6 +11,142 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+### Adicionado
+- **Abrir um banco em uso, somente para leitura e sem lock.** Dá para observar
+  um banco que outro processo segura: `tmjlite --read-only <arquivo>` no CLI,
+  `ReadOnlyDb` no engine e, no TMJStudio, a abertura automática em modo
+  "somente leitura" quando o arquivo está em uso (sem a espera de 10 s), além
+  do botão "Abrir somente leitura". Só `SELECT` e `EXPLAIN` rodam; cada
+  instrução vê o último commit do dono; nada é criado ou alterado no disco
+  (nem `.lock`, nem recovery do WAL). Se o dono fizer checkpoint no meio da
+  leitura, a instrução é repetida sozinha e, no limite, devolve o erro
+  repetível `BUSY` (501), nunca um resultado misturado. Arquivo legado ou
+  anterior à 0.5.0 é recusado neste modo: abra uma vez do jeito normal.
+- **Várias instruções na mesma linha do CLI** (`INSERT …; SELECT …;`) rodam em
+  ordem. O corte é feito pelo `split_statements` do engine, o mesmo que o
+  TMJStudio passou a usar.
+- **Resultado dos testes publicado a cada versão.** A release passa a trazer
+  `TEST-REPORT.md` e `test-report.json`: contagem por suíte (engine, FFI,
+  Studio), torture SQL completo, `kill -9` real com o número de repetições,
+  harness de durabilidade e benchmark. Falhas e
+  testes ignorados aparecem por nome, e uma tentativa repetida fica
+  registrada. Só nomes, resultados e durações — o fonte do engine continua
+  privado. O torture completo também roda toda noite no CI.
+- **Instalador do CLI para macOS e Linux:**
+  `curl -fsSL https://tmjlite.com.br/install.sh | bash` baixa o `.tar.gz` da
+  release, confere o SHA-256 e instala o `tmjlite` em `/usr/local/bin` ou
+  `~/.local/bin`, sem `sudo`. O CLI de macOS/Linux sai também em `.tar.gz`
+  (o `.zip` continua), e a release traz um `SHA256SUMS`.
+- **Fórmula do Homebrew** (`brew install tmjacometti/tap/tmjlite`), gerada a
+  cada versão quando o tap está configurado.
+- **Códigos de erro estáveis.** Todo erro passa a ter, além da mensagem, um
+  código numérico que não muda entre versões: violação de `UNIQUE` (401),
+  `NOT NULL` (403), chave estrangeira (404), banco travado por outro processo
+  (500), arquivo que não é um banco (603), erro de sintaxe (100), tabela
+  inexistente (201), corrupção (7xx), E/S (8xx), transação (9xx), merge
+  (10xx)… A centena é a categoria. A aplicação não precisa mais procurar
+  trechos da mensagem em inglês. A tabela completa está no manual ("Códigos de
+  erro") e em `tmjlite.h` (`TMJLITE_ERR_*`). As mensagens não mudaram.
+  - **Engine:** `TMJError::code()` devolve um `ErrorCode` (`#[non_exhaustive]`,
+    `#[repr(i32)]`), com `category()`, `class()` e `message()`.
+  - **API C:** `tmjlite_errcode`, `tmjlite_errcode_shared`,
+    `tmjlite_shadow_errcode`, `tmjlite_cursor_errcode` e `tmjlite_open_errcode`
+    acompanham cada função de mensagem; `tmjlite_errcode_name` dá o nome de um
+    código. Um panic capturado na FFI vem como `TMJLITE_ERR_INTERNAL` (1400).
+  - **Drivers:** Python `e.code` / `e.code_name` / `e.category`
+    (`tmjlite.ErrorCode`; `TMJLiteError` e `ErrorCode` agora são exportados
+    pelo pacote); Node `e.code` (nome), `e.errno` (número) e `e.category`;
+    C# `e.Code` (`TMJLiteErrorCode`), `e.ErrorNumber`, `e.Category`; Java
+    `e.getCode()` (`ErrorCode`), `e.getErrorNumber()`, `e.getCategory()`; Go
+    `errors.Is(err, tmjlite.ErrUniqueViolation)` /
+    `errors.Is(err, tmjlite.CategoryConstraint)` e o campo `Code`; Rust
+    `e.code()`, `e.raw_code()`, `e.category()`.
+- **Versão da ABI:** `tmjlite_abi_version()` devolve um inteiro que só sobe
+  quando a API C muda, separado de `tmjlite_version()`. Esta é a ABI 2 (uma
+  biblioteca sem o símbolo é a ABI 1). Os seis drivers carregam os símbolos
+  novos de forma opcional: driver novo com biblioteca nativa antiga continua
+  funcionando, com código de erro "desconhecido" (-1). Nos drivers:
+  `abi_version()` / `abiVersion()` / `AbiVersion()` / `ABIVersion()`.
+
+### Corrigido
+- **Subquery correlacionada por FK devolvia vazio logo depois de abrir o
+  banco.** `… WHERE EXISTS (SELECT … FROM pedidos p WHERE p.cliente_id = c.id)`
+  com índice em `cliente_id` não achava nada enquanto a tabela não tivesse
+  recebido uma escrita na sessão: o seek comparava o UUID da PK com a coluna
+  de texto pelo tipo errado. Agora acha.
+- **`INSERT` com apóstrofo gravava o texto errado.** `INSERT INTO t VALUES
+  ('it''s')` guardava `it''s` (com as duas aspas) quando passava pelo caminho
+  rápido de insert. Agora grava `it's`.
+- **SQL muito aninhado não derruba mais o processo.** Parênteses ou
+  subqueries com milhares de níveis, centenas de milhares de linhas de
+  comentário ou cadeias enormes de `AND`/`OR` estouravam a pilha. O parser
+  limita o aninhamento a 32 níveis (erro `NESTING_TOO_DEEP`, 1101) e trata os
+  outros casos sem recursão.
+- **Panic do engine não atravessa mais a FFI.** Toda função da biblioteca
+  nativa captura o panic e devolve erro (`INTERNAL`, 1400) pelo canal que já
+  usava, em vez de encerrar o processo da aplicação.
+- **macOS não mata mais o `tmjlite` baixado pelo navegador.** O CLI e a
+  `libtmjlite_ffi.dylib` que vai dentro dos drivers (PyPI, npm, NuGet, Maven,
+  crates.io, módulo Go e zips) passam a sair assinados com Developer ID e
+  notarizados pela Apple, como o Studio já saía. Antes o binário só tinha a
+  assinatura ad-hoc do linker e o Gatekeeper encerrava o processo na primeira
+  execução (`zsh: killed ./tmjlite`); o contorno com `xattr` deixa de ser
+  necessário.
+
+### Alterado
+- **DDL dentro de transação agora é desfeito pelo `ROLLBACK`.** `CREATE INDEX`,
+  `DROP INDEX` e `ALTER TABLE … SET MERGE POLICY` dentro de `BEGIN` eram
+  aplicados na hora e sobreviviam ao `ROLLBACK`; agora fazem parte da
+  transação, como `CREATE TABLE` já fazia. Quem contava com o índice criado
+  mesmo depois de um `ROLLBACK` precisa criá-lo fora da transação.
+- **`INSERT`, `UPDATE` e `DELETE` não carregam mais a tabela para a memória.**
+  A instrução lê do arquivo só as linhas que o `WHERE` alcança (pelo índice,
+  quando há) e grava direto. Um banco de vários GB deixa de ocupar RAM do
+  tamanho da tabela na primeira escrita. Vale também para tabelas com FK
+  (o pai é conferido pelo índice de PK; `RESTRICT`, `CASCADE` e `SET NULL`
+  buscam os filhos pelo índice da FK, quando existe) e para `INSERT … ON
+  CONFLICT`. `CREATE INDEX`, `DROP TABLE` e `TRUNCATE` também não carregam
+  nada (o índice é montado lendo a tabela em pedaços). Só `ALTER TABLE` que
+  mexe em coluna ainda carrega a tabela, e a solta no fim da instrução.
+  `DELETE` linha a linha ficou ~4× mais rápido, `UPDATE` ~2×; `INSERT`, igual.
+  Para quem usa o crate direto: `db.tables` só tem o que foi materializado
+  com `load_table`; o schema se lê com `table_names()` e o novo
+  `table_columns(nome)` / `table_row_count(nome)`.
+- **TMJStudio: a lista de tabelas não carrega mais as linhas.** O explorer lia
+  todas as tabelas inteiras para mostrar nome, colunas e contagem; agora vem
+  do catálogo do arquivo.
+- **A transação passou a viver no arquivo, não na memória.** Cada instrução de
+  um `BEGIN` é gravada na hora e fica pendente até o `COMMIT`; o `ROLLBACK`
+  descarta o pendente. Some a cópia da tabela inteira que DDL e `TRUNCATE`
+  guardavam para o `ROLLBACK`, e o `COMMIT` deixa de reescrever a tabela.
+  `INSERT`s seguidos continuam indo em lote (100 mil numa transação: igual à
+  versão anterior). Se o disco falhar no meio de uma transação, ela é desfeita
+  inteira e o erro diz isso.
+- **Licença.** O código-fonte do engine, da FFI, do CLI e do TMJStudio é
+  proprietário da TMJ Sistemas de Informação (arquivo `LICENSE`). Os drivers
+  continuam sob MIT, cada um com o seu `LICENSE`. Os binários oficiais podem
+  ser usados e redistribuídos sem modificação.
+- **Uma linha só com `;` no CLI não faz nada** (antes dava erro de parse).
+- **Coluna `HASH`: o formato SHA-256 antigo não é mais verificado.** As
+  funções de verificação não tinham uso no engine e foram removidas; uma linha
+  gravada antes de 2026-06 só casa com `WHERE col = '<texto>'` depois de um
+  `UPDATE` com o texto, como já acontecia.
+- **CLI em crate próprio** (`tmjlite-cli`); a biblioteca do engine não depende
+  mais de `rustyline` e expõe só a fachada pública do `lib.rs`.
+- **Driver Rust: `Error::Database` guarda `DatabaseError`** (mensagem +
+  código) no lugar de `String`. O tipo se comporta como a mensagem (`Deref`
+  para `str`, `Display`, `Debug` igual, `==` com `&str`/`String`,
+  `From<&str>`/`From<String>`), então `Error::Database(m) if m.contains("…")`
+  continua compilando. Precisa de ajuste só quem movia o conteúdo para uma
+  `String` (use `m.into()` ou `m.into_string()`) ou construía a variante com
+  uma `String` já tipada (acrescente `.into()`).
+- **Driver Rust carrega biblioteca nativa mais antiga:** os símbolos da ABI 2
+  são opcionais, em vez de recusar a biblioteca inteira por um símbolo ausente.
+- **Driver Go liga com `-ldl` no Linux** (os símbolos da ABI 2 são resolvidos
+  com `dlsym` em tempo de execução).
+
 ## [0.5.1] - 2026-11-24
 
 ### Corrigido
@@ -748,7 +884,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.9...v0.4.0

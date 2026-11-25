@@ -1,7 +1,46 @@
+// Copyright (c) 2026 TMJ Sistemas de Informação.
+// SPDX-License-Identifier: MIT
+
 package tmjlite
 
-// #include "include/tmjlite.h"
-// #include <stdlib.h>
+/*
+#cgo linux LDFLAGS: -ldl
+#ifndef _WIN32
+#define _GNU_SOURCE
+#endif
+#include "include/tmjlite.h"
+#include <stdlib.h>
+#include <stdint.h>
+
+// Símbolos da ABI 2 (códigos de erro) são resolvidos em tempo de execução, e
+// não pelo linker: assim um binário compilado com este driver ainda carrega
+// uma libtmjlite_ffi anterior aos códigos (o símbolo ausente vira NULL e o
+// código do erro vira "desconhecido", -1).
+#ifdef _WIN32
+#include <windows.h>
+static void *tmj_sym(const char *name) {
+    HMODULE m = GetModuleHandleA("tmjlite_ffi.dll");
+    return m ? (void *)GetProcAddress(m, name) : NULL;
+}
+#else
+#include <dlfcn.h>
+static void *tmj_sym(const char *name) { return dlsym(RTLD_DEFAULT, name); }
+#endif
+
+typedef int32_t (*tmj_handle_code_fn)(const void *);
+typedef int32_t (*tmj_plain_code_fn)(void);
+typedef uint32_t (*tmj_abi_fn)(void);
+
+static int32_t tmj_handle_code(void *fn, const void *handle) {
+    return fn ? ((tmj_handle_code_fn)fn)(handle) : -1;
+}
+static int32_t tmj_plain_code(void *fn) {
+    return fn ? ((tmj_plain_code_fn)fn)() : -1;
+}
+static uint32_t tmj_abi(void *fn) {
+    return fn ? ((tmj_abi_fn)fn)() : 1;
+}
+*/
 import "C"
 
 import (
@@ -10,16 +49,354 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"unsafe"
 )
 
+// ErrorCode is a stable TMJLite error code. The numeric values never change
+// and are never reused; the hundred is the category (see Category).
+//
+// An ErrorCode is itself an error, so it works as a sentinel:
+//
+//	if errors.Is(err, tmjlite.ErrUniqueViolation) { ... }
+//
+// New codes may appear in a future native library; a number this driver does
+// not know still carries its category.
+type ErrorCode int32
+
+const (
+	// ErrUnknown means "no code": the native library predates error codes
+	// (ABI 1), or the error was produced by the driver itself.
+	ErrUnknown ErrorCode = -1
+
+	// GENERIC
+	// Erro sem classificação mais específica.
+	ErrError ErrorCode = 1
+
+	// SQL
+	// SQL que o parser não aceita.
+	ErrSyntax ErrorCode = 100
+	// SQL bem formado, mas a consulta é inválida (GROUP BY, ORDER BY fora do SELECT, número de valores, subconsulta com mais de uma linha).
+	ErrSemantic ErrorCode = 101
+
+	// SCHEMA
+	// DDL inválido ou objeto em estado que não permite a operação.
+	ErrSchema ErrorCode = 200
+	// Tabela não existe.
+	ErrNoSuchTable ErrorCode = 201
+	// Coluna não existe.
+	ErrNoSuchColumn ErrorCode = 202
+	// Índice não existe.
+	ErrNoSuchIndex ErrorCode = 203
+	// Tabela já existe.
+	ErrTableExists ErrorCode = 204
+	// Coluna já existe.
+	ErrColumnExists ErrorCode = 205
+	// Índice já existe (pelo nome ou pelas colunas).
+	ErrIndexExists ErrorCode = 206
+	// Coluna ambígua: qualifique com tabela ou alias.
+	ErrAmbiguousColumn ErrorCode = 207
+
+	// TYPE
+	// Valor de um tipo que a coluna não aceita.
+	ErrTypeMismatch ErrorCode = 300
+	// Tipo certo, valor inaceitável (maior que STRING(n), data inválida, byte NUL).
+	ErrInvalidValue ErrorCode = 301
+
+	// CONSTRAINT
+	// Violação de restrição sem código mais específico.
+	ErrConstraint ErrorCode = 400
+	// Chave duplicada em índice UNIQUE.
+	ErrUniqueViolation ErrorCode = 401
+	// Tentativa de definir ou alterar a PK (ela é gerada pelo engine).
+	ErrPrimaryKeyViolation ErrorCode = 402
+	// NULL em coluna NOT NULL.
+	ErrNotNullViolation ErrorCode = 403
+	// Chave estrangeira sem pai, ou pai ainda referenciado.
+	ErrForeignKeyViolation ErrorCode = 404
+
+	// ACCESS
+	// Arquivo travado por outro processo.
+	ErrLocked ErrorCode = 500
+	// A operação precisa de acesso exclusivo indisponível agora (ex.: VACUUM em conexão shared).
+	ErrBusy ErrorCode = 501
+	// Escrita em conexão, snapshot ou mídia só de leitura.
+	ErrReadOnly ErrorCode = 502
+
+	// OPEN
+	// Não foi possível abrir (motivo fora dos códigos abaixo).
+	ErrCannotOpen ErrorCode = 600
+	// Arquivo ou diretório não existe.
+	ErrFileNotFound ErrorCode = 601
+	// Permissão negada pelo sistema operacional.
+	ErrPermissionDenied ErrorCode = 602
+	// O arquivo existe mas não é um banco TMJLite.
+	ErrNotADatabase ErrorCode = 603
+	// Arquivo TMJLite de versão/formato que esta biblioteca não lê.
+	ErrUnsupportedFormat ErrorCode = 604
+	// O arquivo já existe.
+	ErrFileExists ErrorCode = 605
+
+	// CORRUPT
+	// Estrutura em disco inválida.
+	ErrCorrupt ErrorCode = 700
+	// Checksum de página ou de arquivo não confere.
+	ErrCorruptChecksum ErrorCode = 701
+	// WAL inválido, incompleto ou incoerente com o arquivo principal.
+	ErrCorruptWal ErrorCode = 702
+
+	// IO
+	// Falha de leitura/escrita/armazenamento sem código mais específico.
+	ErrIo ErrorCode = 800
+	// fsync falhou: a durabilidade não está garantida.
+	ErrIoFsync ErrorCode = 801
+	// Disco cheio ou cota excedida.
+	ErrDiskFull ErrorCode = 802
+
+	// TRANSACTION
+	// Erro de estado de transação sem código mais específico.
+	ErrTransaction ErrorCode = 900
+	// COMMIT/ROLLBACK sem transação ativa.
+	ErrNoActiveTransaction ErrorCode = 901
+	// Já existe transação ativa (BEGIN aninhado, VACUUM dentro de transação).
+	ErrTransactionActive ErrorCode = 902
+	// A recuperação de uma transação falhou: feche e reabra o banco.
+	ErrTransactionAborted ErrorCode = 903
+
+	// MERGE
+	// Erro de sessão shadow/merge sem código mais específico.
+	ErrMerge ErrorCode = 1000
+	// Conflito de merge.
+	ErrMergeConflict ErrorCode = 1001
+	// O shadow foi gravado contra um esquema diferente do atual.
+	ErrSchemaDivergence ErrorCode = 1002
+	// Branch não existe.
+	ErrNoSuchBranch ErrorCode = 1003
+	// Branch já existe.
+	ErrBranchExists ErrorCode = 1004
+	// Há operações não seladas no branch.
+	ErrUnsealedOps ErrorCode = 1005
+
+	// LIMIT
+	// Limite do engine excedido (tamanho de chave, LIMIT grande demais).
+	ErrLimitExceeded ErrorCode = 1100
+	// Parênteses/subconsultas aninhados além do limite.
+	ErrNestingTooDeep ErrorCode = 1101
+
+	// UNSUPPORTED
+	// Recurso não suportado.
+	ErrUnsupported ErrorCode = 1200
+	// Mais de uma instrução na mesma chamada.
+	ErrMultipleStatements ErrorCode = 1201
+
+	// MISUSE
+	// Uso incorreto da API (argumento inválido, statement nulo, cursor sobre algo que não é SELECT).
+	ErrMisuse ErrorCode = 1300
+	// Número de parâmetros diferente do número de ?.
+	ErrParamCount ErrorCode = 1301
+
+	// INTERNAL
+	// Erro interno (invariante quebrada ou panic capturado): bug do TMJLite.
+	ErrInternal ErrorCode = 1400
+)
+
+var errorCodeNames = map[ErrorCode]string{
+	ErrUnknown:             "UNKNOWN",
+	ErrError:               "ERROR",
+	ErrSyntax:              "SYNTAX",
+	ErrSemantic:            "SEMANTIC",
+	ErrSchema:              "SCHEMA",
+	ErrNoSuchTable:         "NO_SUCH_TABLE",
+	ErrNoSuchColumn:        "NO_SUCH_COLUMN",
+	ErrNoSuchIndex:         "NO_SUCH_INDEX",
+	ErrTableExists:         "TABLE_EXISTS",
+	ErrColumnExists:        "COLUMN_EXISTS",
+	ErrIndexExists:         "INDEX_EXISTS",
+	ErrAmbiguousColumn:     "AMBIGUOUS_COLUMN",
+	ErrTypeMismatch:        "TYPE_MISMATCH",
+	ErrInvalidValue:        "INVALID_VALUE",
+	ErrConstraint:          "CONSTRAINT",
+	ErrUniqueViolation:     "UNIQUE_VIOLATION",
+	ErrPrimaryKeyViolation: "PRIMARY_KEY_VIOLATION",
+	ErrNotNullViolation:    "NOT_NULL_VIOLATION",
+	ErrForeignKeyViolation: "FOREIGN_KEY_VIOLATION",
+	ErrLocked:              "LOCKED",
+	ErrBusy:                "BUSY",
+	ErrReadOnly:            "READ_ONLY",
+	ErrCannotOpen:          "CANNOT_OPEN",
+	ErrFileNotFound:        "FILE_NOT_FOUND",
+	ErrPermissionDenied:    "PERMISSION_DENIED",
+	ErrNotADatabase:        "NOT_A_DATABASE",
+	ErrUnsupportedFormat:   "UNSUPPORTED_FORMAT",
+	ErrFileExists:          "FILE_EXISTS",
+	ErrCorrupt:             "CORRUPT",
+	ErrCorruptChecksum:     "CORRUPT_CHECKSUM",
+	ErrCorruptWal:          "CORRUPT_WAL",
+	ErrIo:                  "IO",
+	ErrIoFsync:             "IO_FSYNC",
+	ErrDiskFull:            "DISK_FULL",
+	ErrTransaction:         "TRANSACTION",
+	ErrNoActiveTransaction: "NO_ACTIVE_TRANSACTION",
+	ErrTransactionActive:   "TRANSACTION_ACTIVE",
+	ErrTransactionAborted:  "TRANSACTION_ABORTED",
+	ErrMerge:               "MERGE",
+	ErrMergeConflict:       "MERGE_CONFLICT",
+	ErrSchemaDivergence:    "SCHEMA_DIVERGENCE",
+	ErrNoSuchBranch:        "NO_SUCH_BRANCH",
+	ErrBranchExists:        "BRANCH_EXISTS",
+	ErrUnsealedOps:         "UNSEALED_OPS",
+	ErrLimitExceeded:       "LIMIT_EXCEEDED",
+	ErrNestingTooDeep:      "NESTING_TOO_DEEP",
+	ErrUnsupported:         "UNSUPPORTED",
+	ErrMultipleStatements:  "MULTIPLE_STATEMENTS",
+	ErrMisuse:              "MISUSE",
+	ErrParamCount:          "PARAM_COUNT",
+	ErrInternal:            "INTERNAL",
+}
+
+// String returns the stable name of the code ("UNIQUE_VIOLATION"), or
+// "CODE_<n>" for a number this driver does not know.
+func (c ErrorCode) String() string {
+	if name, ok := errorCodeNames[c]; ok {
+		return name
+	}
+	return "CODE_" + strconv.Itoa(int(c))
+}
+
+// Error makes ErrorCode usable as an errors.Is target.
+func (c ErrorCode) Error() string {
+	return "tmjlite: " + c.String()
+}
+
+// Category returns the category of the code (its hundred).
+func (c ErrorCode) Category() ErrorCategory {
+	if c <= 0 {
+		return CategoryUnknown
+	}
+	if h := int(c) / 100; h < len(errorCategoryNames) {
+		return ErrorCategory(h)
+	}
+	return CategoryGeneric
+}
+
+// ErrorCategory groups error codes. Like ErrorCode it is an error, so a whole
+// category can be matched:
+//
+//	if errors.Is(err, tmjlite.CategoryConstraint) { ... } // any 4xx
+type ErrorCategory int
+
+const (
+	CategoryGeneric ErrorCategory = iota
+	CategorySql
+	CategorySchema
+	CategoryType
+	CategoryConstraint
+	CategoryAccess
+	CategoryOpen
+	CategoryCorrupt
+	CategoryIo
+	CategoryTransaction
+	CategoryMerge
+	CategoryLimit
+	CategoryUnsupported
+	CategoryMisuse
+	CategoryInternal
+	// CategoryUnknown: the error carries no code.
+	CategoryUnknown ErrorCategory = -1
+)
+
+var errorCategoryNames = [...]string{"GENERIC", "SQL", "SCHEMA", "TYPE", "CONSTRAINT", "ACCESS", "OPEN", "CORRUPT", "IO", "TRANSACTION", "MERGE", "LIMIT", "UNSUPPORTED", "MISUSE", "INTERNAL"}
+
+// String returns the stable name of the category ("CONSTRAINT").
+func (c ErrorCategory) String() string {
+	if c >= 0 && int(c) < len(errorCategoryNames) {
+		return errorCategoryNames[c]
+	}
+	return "UNKNOWN"
+}
+
+// Error makes ErrorCategory usable as an errors.Is target.
+func (c ErrorCategory) Error() string {
+	return "tmjlite: " + c.String()
+}
+
 // TMJLiteError represents an error returned by the TMJLite engine.
+//
+// Message is the text the engine produced (unchanged by error codes). Code is
+// the stable code: decide on it, not on the text. Use errors.As to reach the
+// struct, or errors.Is with an ErrorCode / ErrorCategory:
+//
+//	var te *tmjlite.TMJLiteError
+//	if errors.As(err, &te) && te.Code == tmjlite.ErrLocked { ... }
+//	if errors.Is(err, tmjlite.ErrUniqueViolation) { ... }
+//	if errors.Is(err, tmjlite.CategoryConstraint) { ... }
+//
+// Code is ErrUnknown (-1) when the native library predates error codes or the
+// error was produced by the driver; a zero Code means the same.
 type TMJLiteError struct {
 	Message string
+	Code    ErrorCode
 }
 
 func (e *TMJLiteError) Error() string {
 	return fmt.Sprintf("tmjlite: %s", e.Message)
+}
+
+// Is reports whether target is the ErrorCode or the ErrorCategory of e.
+func (e *TMJLiteError) Is(target error) bool {
+	switch t := target.(type) {
+	case ErrorCode:
+		return e.Code > 0 && e.Code == t
+	case ErrorCategory:
+		return e.Code > 0 && e.Code.Category() == t
+	}
+	return false
+}
+
+// Símbolos opcionais da ABI 2, resolvidos uma vez.
+var abi2 struct {
+	once                                           sync.Once
+	version, classic, shared, shadow, cursor, open unsafe.Pointer
+}
+
+func abi2Symbols() {
+	abi2.once.Do(func() {
+		lookup := func(name string) unsafe.Pointer {
+			cname := C.CString(name)
+			defer C.free(unsafe.Pointer(cname))
+			return C.tmj_sym(cname)
+		}
+		abi2.version = lookup("tmjlite_abi_version")
+		abi2.classic = lookup("tmjlite_errcode")
+		abi2.shared = lookup("tmjlite_errcode_shared")
+		abi2.shadow = lookup("tmjlite_shadow_errcode")
+		abi2.cursor = lookup("tmjlite_cursor_errcode")
+		abi2.open = lookup("tmjlite_open_errcode")
+	})
+}
+
+// handleCode reads the last error code of a handle through an optional
+// symbol; ErrUnknown when the native library does not have it.
+func handleCode(fn unsafe.Pointer, handle unsafe.Pointer) ErrorCode {
+	return ErrorCode(C.tmj_handle_code(fn, handle))
+}
+
+// plainCode is handleCode for an accessor without arguments (open error).
+func plainCode(fn unsafe.Pointer) ErrorCode {
+	return ErrorCode(C.tmj_plain_code(fn))
+}
+
+// abiOf calls tmjlite_abi_version through its optional symbol; 1 if absent.
+func abiOf(fn unsafe.Pointer) int {
+	return int(C.tmj_abi(fn))
+}
+
+// ABIVersion returns the ABI number of the loaded native library. It is 1 for
+// a library that predates error codes (it does not export
+// tmjlite_abi_version); every error then has Code == ErrUnknown.
+func ABIVersion() int {
+	abi2Symbols()
+	return abiOf(abi2.version)
 }
 
 // Connection represents an open TMJLite database connection.
@@ -182,20 +559,25 @@ func (r *Row) ToMap() map[string]interface{} {
 // errFromDB extracts the last error message from the database handle.
 func errFromDB(db *C.TmjDb) error {
 	msg := C.tmjlite_errmsg(db)
+	abi2Symbols()
+	code := handleCode(abi2.classic, unsafe.Pointer(db))
 	if msg == nil {
-		return &TMJLiteError{Message: "unknown error"}
+		return &TMJLiteError{Message: "unknown error", Code: code}
 	}
-	return &TMJLiteError{Message: C.GoString(msg)}
+	return &TMJLiteError{Message: C.GoString(msg), Code: code}
 }
 
 // openFailure builds the error for a failed open with the reason the engine
 // gave (locked by another process, not a TMJLite database, permission denied,
 // missing directory...). Call it on the same OS thread as the failed open.
 func openFailure(what string) *TMJLiteError {
-	if reason := C.tmjlite_open_error(); reason != nil {
-		return &TMJLiteError{Message: what + ": " + C.GoString(reason)}
+	abi2Symbols()
+	reason := C.tmjlite_open_error()
+	code := plainCode(abi2.open)
+	if reason != nil {
+		return &TMJLiteError{Message: what + ": " + C.GoString(reason), Code: code}
 	}
-	return &TMJLiteError{Message: what}
+	return &TMJLiteError{Message: what, Code: code}
 }
 
 // Open opens a file-backed database at the given path.
@@ -391,10 +773,12 @@ func OpenShared(path string) (*SharedConnection, error) {
 
 func errFromShared(db *C.TmjSharedDb) error {
 	msg := C.tmjlite_errmsg_shared(db)
+	abi2Symbols()
+	code := handleCode(abi2.shared, unsafe.Pointer(db))
 	if msg == nil {
-		return &TMJLiteError{Message: "unknown error"}
+		return &TMJLiteError{Message: "unknown error", Code: code}
 	}
-	return &TMJLiteError{Message: C.GoString(msg)}
+	return &TMJLiteError{Message: C.GoString(msg), Code: code}
 }
 
 // Execute runs a non-query SQL statement. Safe to call from any goroutine.
@@ -511,10 +895,12 @@ func OpenBranch(path, name string) (*ShadowConnection, error) {
 
 func errFromShadow(db *C.TmjShadow) error {
 	msg := C.tmjlite_shadow_errmsg(db)
+	abi2Symbols()
+	code := handleCode(abi2.shadow, unsafe.Pointer(db))
 	if msg == nil {
-		return &TMJLiteError{Message: "unknown error"}
+		return &TMJLiteError{Message: "unknown error", Code: code}
 	}
-	return &TMJLiteError{Message: C.GoString(msg)}
+	return &TMJLiteError{Message: C.GoString(msg), Code: code}
 }
 
 // Execute runs INSERT/UPDATE/DELETE (recorded as ops) or any other DML.
@@ -780,7 +1166,7 @@ func (c *SharedConnection) MemoryStats() (*MemoryStats, error) {
 	defer C.tmjlite_string_free(p)
 	var st MemoryStats
 	if err := json.Unmarshal([]byte(C.GoString(p)), &st); err != nil {
-		return nil, &TMJLiteError{Message: "memory_stats: " + err.Error()}
+		return nil, &TMJLiteError{Message: "memory_stats: " + err.Error(), Code: ErrUnknown}
 	}
 	return &st, nil
 }
@@ -841,7 +1227,7 @@ func paramsJSON(params []interface{}) (*C.char, error) {
 	}
 	b, err := json.Marshal(params)
 	if err != nil {
-		return nil, &TMJLiteError{Message: "params: " + err.Error()}
+		return nil, &TMJLiteError{Message: "params: " + err.Error(), Code: ErrUnknown}
 	}
 	return C.CString(string(b)), nil
 }
@@ -856,7 +1242,7 @@ func (s *PreparedStatement) lastErr() error {
 // Exec runs the statement with the given parameters.
 func (s *PreparedStatement) Exec(params ...interface{}) error {
 	if s.stmt == nil {
-		return &TMJLiteError{Message: "PreparedStatement is closed"}
+		return &TMJLiteError{Message: "PreparedStatement is closed", Code: ErrUnknown}
 	}
 	cParams, err := paramsJSON(params)
 	if err != nil {
@@ -880,7 +1266,7 @@ func (s *PreparedStatement) Exec(params ...interface{}) error {
 // single-row INSERT, the generated PK (Exec keeps the error-only form).
 func (s *PreparedStatement) ExecResult(params ...interface{}) (*ExecResult, error) {
 	if s.stmt == nil {
-		return nil, &TMJLiteError{Message: "PreparedStatement is closed"}
+		return nil, &TMJLiteError{Message: "PreparedStatement is closed", Code: ErrUnknown}
 	}
 	cParams, err := paramsJSON(params)
 	if err != nil {
@@ -902,7 +1288,7 @@ func (s *PreparedStatement) ExecResult(params ...interface{}) (*ExecResult, erro
 
 func (s *PreparedStatement) Query(params ...interface{}) (*QueryResult, error) {
 	if s.stmt == nil {
-		return nil, &TMJLiteError{Message: "PreparedStatement is closed"}
+		return nil, &TMJLiteError{Message: "PreparedStatement is closed", Code: ErrUnknown}
 	}
 	cParams, err := paramsJSON(params)
 	if err != nil {
@@ -1000,10 +1386,13 @@ func (cu *Cursor) Next() bool {
 		return false
 	}
 	if rc < 0 {
-		if msg := C.tmjlite_cursor_errmsg(cu.c); msg != nil {
-			cu.err = &TMJLiteError{Message: C.GoString(msg)}
+		msg := C.tmjlite_cursor_errmsg(cu.c)
+		abi2Symbols()
+		code := handleCode(abi2.cursor, unsafe.Pointer(cu.c))
+		if msg != nil {
+			cu.err = &TMJLiteError{Message: C.GoString(msg), Code: code}
 		} else {
-			cu.err = &TMJLiteError{Message: "cursor step failed"}
+			cu.err = &TMJLiteError{Message: "cursor step failed", Code: code}
 		}
 		return false
 	}

@@ -24,6 +24,108 @@ extern "C" {
 #define TMJLITE_OK    0
 #define TMJLITE_ERROR 1
 
+/* ---- Stable error codes (ABI 2+) ----
+ *
+ * Every place that holds an error message also holds a numeric code:
+ *
+ *   message                    code
+ *   tmjlite_errmsg             tmjlite_errcode
+ *   tmjlite_errmsg_shared      tmjlite_errcode_shared
+ *   tmjlite_shadow_errmsg      tmjlite_shadow_errcode
+ *   tmjlite_cursor_errmsg      tmjlite_cursor_errcode
+ *   tmjlite_open_error         tmjlite_open_errcode
+ *
+ * Message and code are set and cleared together: 0 means "no error".
+ * (Prepared statements report through the handle they run on.)
+ *
+ * The contract:
+ *  - a code's numeric value never changes and is never reused;
+ *  - new codes may be added in any release, so treat a code you do not know
+ *    by its category, TMJLITE_ERR_CATEGORY(code) (code / 100), or as a
+ *    generic error;
+ *  - the message text is for people and is NOT part of the contract.
+ *
+ * Do not confuse with the int returned by tmjlite_exec & co, which stays
+ * TMJLITE_OK / TMJLITE_ERROR. */
+#define TMJLITE_ERR_CATEGORY(code) ((code) / 100)
+
+/* GENERIC */
+#define TMJLITE_ERR_ERROR                    1  /* Error with no more specific classification */
+/* SQL */
+#define TMJLITE_ERR_SYNTAX                 100  /* SQL the parser rejects */
+#define TMJLITE_ERR_SEMANTIC               101  /* Well-formed SQL but invalid query (GROUP BY, ORDER BY not in SELECT, value count, multi-row scalar subquery) */
+/* SCHEMA */
+#define TMJLITE_ERR_SCHEMA                 200  /* Invalid DDL, or schema object state forbids the operation */
+#define TMJLITE_ERR_NO_SUCH_TABLE          201  /* Table does not exist */
+#define TMJLITE_ERR_NO_SUCH_COLUMN         202  /* Column does not exist */
+#define TMJLITE_ERR_NO_SUCH_INDEX          203  /* Index does not exist */
+#define TMJLITE_ERR_TABLE_EXISTS           204  /* Table already exists */
+#define TMJLITE_ERR_COLUMN_EXISTS          205  /* Column already exists */
+#define TMJLITE_ERR_INDEX_EXISTS           206  /* Index already exists (by name or by columns) */
+#define TMJLITE_ERR_AMBIGUOUS_COLUMN       207  /* Ambiguous column: qualify it with table or alias */
+/* TYPE */
+#define TMJLITE_ERR_TYPE_MISMATCH          300  /* Value of a type the column does not accept */
+#define TMJLITE_ERR_INVALID_VALUE          301  /* Right type, unacceptable value (longer than STRING(n), invalid date, NUL byte) */
+/* CONSTRAINT */
+#define TMJLITE_ERR_CONSTRAINT             400  /* Constraint violation with no more specific code */
+#define TMJLITE_ERR_UNIQUE_VIOLATION       401  /* Duplicate key in a UNIQUE index */
+#define TMJLITE_ERR_PRIMARY_KEY_VIOLATION  402  /* Attempt to set or change the PK (the engine generates it) */
+#define TMJLITE_ERR_NOT_NULL_VIOLATION     403  /* NULL in a NOT NULL column */
+#define TMJLITE_ERR_FOREIGN_KEY_VIOLATION  404  /* Foreign key without parent, or parent still referenced */
+/* ACCESS */
+#define TMJLITE_ERR_LOCKED                 500  /* File locked by another process */
+#define TMJLITE_ERR_BUSY                   501  /* Operation needs exclusive access that is unavailable now (e.g. VACUUM on a shared connection) */
+#define TMJLITE_ERR_READ_ONLY              502  /* Write on a read-only connection, snapshot or medium */
+/* OPEN */
+#define TMJLITE_ERR_CANNOT_OPEN            600  /* Could not open (reason not covered below) */
+#define TMJLITE_ERR_FILE_NOT_FOUND         601  /* File or directory does not exist */
+#define TMJLITE_ERR_PERMISSION_DENIED      602  /* Permission denied by the operating system */
+#define TMJLITE_ERR_NOT_A_DATABASE         603  /* File exists but is not a TMJLite database */
+#define TMJLITE_ERR_UNSUPPORTED_FORMAT     604  /* TMJLite file of a version/format this library cannot read */
+#define TMJLITE_ERR_FILE_EXISTS            605  /* File already exists */
+/* CORRUPT */
+#define TMJLITE_ERR_CORRUPT                700  /* Invalid on-disk structure */
+#define TMJLITE_ERR_CORRUPT_CHECKSUM       701  /* Page or file checksum mismatch */
+#define TMJLITE_ERR_CORRUPT_WAL            702  /* WAL invalid, incomplete or inconsistent with the main file */
+/* IO */
+#define TMJLITE_ERR_IO                     800  /* Read/write/storage failure with no more specific code */
+#define TMJLITE_ERR_IO_FSYNC               801  /* fsync failed: durability is not guaranteed */
+#define TMJLITE_ERR_DISK_FULL              802  /* Disk full or quota exceeded */
+/* TRANSACTION */
+#define TMJLITE_ERR_TRANSACTION            900  /* Transaction state error with no more specific code */
+#define TMJLITE_ERR_NO_ACTIVE_TRANSACTION  901  /* COMMIT/ROLLBACK without an active transaction */
+#define TMJLITE_ERR_TRANSACTION_ACTIVE     902  /* A transaction is already active (nested BEGIN, VACUUM inside a transaction) */
+#define TMJLITE_ERR_TRANSACTION_ABORTED    903  /* Transaction recovery failed: close and reopen the database */
+/* MERGE */
+#define TMJLITE_ERR_MERGE                 1000  /* Shadow session/merge error with no more specific code */
+#define TMJLITE_ERR_MERGE_CONFLICT        1001  /* Merge conflict */
+#define TMJLITE_ERR_SCHEMA_DIVERGENCE     1002  /* The shadow was written against a different schema */
+#define TMJLITE_ERR_NO_SUCH_BRANCH        1003  /* Branch does not exist */
+#define TMJLITE_ERR_BRANCH_EXISTS         1004  /* Branch already exists */
+#define TMJLITE_ERR_UNSEALED_OPS          1005  /* The branch has unsealed operations */
+/* LIMIT */
+#define TMJLITE_ERR_LIMIT_EXCEEDED        1100  /* Engine limit exceeded (key size, LIMIT too large) */
+#define TMJLITE_ERR_NESTING_TOO_DEEP      1101  /* Parentheses/subqueries nested beyond the limit */
+/* UNSUPPORTED */
+#define TMJLITE_ERR_UNSUPPORTED           1200  /* Unsupported feature */
+#define TMJLITE_ERR_MULTIPLE_STATEMENTS   1201  /* More than one statement in a single call */
+/* MISUSE */
+#define TMJLITE_ERR_MISUSE                1300  /* API misuse (invalid argument, null statement, cursor over a non-SELECT) */
+#define TMJLITE_ERR_PARAM_COUNT           1301  /* Parameter count differs from the number of ? */
+/* INTERNAL */
+#define TMJLITE_ERR_INTERNAL              1400  /* Internal error (broken invariant or captured panic): a TMJLite bug */
+/* 405 is reserved for CHECK. */
+
+/* Internal errors: a panic inside the engine never crosses this boundary.
+ * It is caught and reported through the function's normal error return
+ * (NULL, TMJLITE_ERROR, -1...), with the message "internal error (panic): ..."
+ * in the usual place (tmjlite_errmsg*, tmjlite_cursor_errmsg,
+ * tmjlite_shadow_errmsg, or tmjlite_open_error for the open functions)
+ * and the code TMJLITE_ERR_INTERNAL in the matching *_errcode function.
+ * The handle stays valid for reading the error and closing; treat it as a
+ * fatal error for that handle, since the interrupted operation may be
+ * half done. */
+
 /* Opaque handles */
 typedef struct TmjDb TmjDb;
 typedef struct TmjResult TmjResult;
@@ -40,6 +142,10 @@ TmjDb *tmjlite_open(const char *path);
  * permission denied, missing directory... NULL if that open succeeded.
  * The pointer is valid until the next open call on the same thread. (0.5.1+) */
 const char *tmjlite_open_error(void);
+
+/* Code (TMJLITE_ERR_*) of that same failed open; 0 if the last open on this
+ * thread succeeded. (ABI 2+) */
+int32_t tmjlite_open_errcode(void);
 
 /* Create an in-memory database (no file, data lost on close). */
 TmjDb *tmjlite_open_memory(void);
@@ -117,6 +223,14 @@ void tmjlite_result_free(TmjResult *result);
 /* Last error message, or NULL if no error.
  * The returned pointer is valid until the next call on this db. */
 const char *tmjlite_errmsg(const TmjDb *db);
+
+/* Last error code (TMJLITE_ERR_*), or 0 if no error. Set and cleared together
+ * with tmjlite_errmsg(). A NULL handle returns TMJLITE_ERR_MISUSE. (ABI 2+) */
+int32_t tmjlite_errcode(const TmjDb *db);
+
+/* Stable name of a code ("UNIQUE_VIOLATION" for 401), or NULL if this
+ * library does not know the number. Static string: do not free. (ABI 2+) */
+const char *tmjlite_errcode_name(int32_t code);
 
 /* ---- Save ---- */
 
@@ -258,11 +372,18 @@ int tmjlite_cursor_f64(const TmjCursor *c, int col, double *out);
 int tmjlite_cursor_bool(const TmjCursor *c, int col, int *out);
 int tmjlite_cursor_is_streaming(const TmjCursor *c);
 const char *tmjlite_cursor_errmsg(const TmjCursor *c);
+/* Last error code of the cursor (TMJLITE_ERR_*), or 0. (ABI 2+) */
+int32_t tmjlite_cursor_errcode(const TmjCursor *c);
 void tmjlite_cursor_close(TmjCursor *c);
 
 /* Last error message for the calling thread, or NULL.
  * The pointer stays valid for this thread until its next call. */
 const char *tmjlite_errmsg_shared(const TmjSharedDb *db);
+
+/* Last error code of the shared handle (TMJLITE_ERR_*), or 0. The error slot
+ * belongs to the handle: with several threads failing at once the most
+ * recent error wins, so read it right after the call that failed. (ABI 2+) */
+int32_t tmjlite_errcode_shared(const TmjSharedDb *db);
 
 /* ---- Shadow (git-merge) API ---- */
 
@@ -325,10 +446,33 @@ long long tmjlite_shadow_conflicts(TmjShadow *db);
 /* Last error message, or NULL. Valid until the next call on this handle. */
 const char *tmjlite_shadow_errmsg(const TmjShadow *db);
 
+/* Last error code (TMJLITE_ERR_*), or 0. After tmjlite_shadow_conflicts()
+ * returned > 0 it is TMJLITE_ERR_MERGE_CONFLICT. (ABI 2+) */
+int32_t tmjlite_shadow_errcode(const TmjShadow *db);
+
 /* ---- Version ---- */
 
 /* Returns the library version string (e.g. "0.1.0-capivara"). */
 const char *tmjlite_version(void);
+
+/* ABI number of this library: an integer, independent of tmjlite_version().
+ *
+ * Rule: it is bumped by exactly 1 whenever the C ABI changes — a function is
+ * added, removed, or changes signature or meaning — and ONLY then. A release
+ * that does not touch this header keeps the number. Additions are backward
+ * compatible: a caller built for ABI N works with any library >= N unless a
+ * release note says a function was removed.
+ *
+ *   1  everything that existed before stable error codes. Those libraries
+ *      do NOT export this symbol: a missing tmjlite_abi_version IS ABI 1.
+ *   2  tmjlite_abi_version, tmjlite_errcode, tmjlite_errcode_shared,
+ *      tmjlite_shadow_errcode, tmjlite_cursor_errcode, tmjlite_open_errcode,
+ *      tmjlite_errcode_name.
+ *
+ * Drivers resolve the ABI 2 symbols optionally, so a new driver still loads
+ * an ABI 1 library (error codes are then reported as unknown, -1). */
+#define TMJLITE_ABI_VERSION 2
+uint32_t tmjlite_abi_version(void);
 
 #ifdef __cplusplus
 }

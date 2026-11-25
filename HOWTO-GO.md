@@ -224,6 +224,108 @@ fmt.Println(r.RowsAffected, r.LastPk) // 1 <uuid da linha inserida OU atualizada
 - **Upsert de várias linhas** é tudo ou nada: um erro em qualquer linha desfaz
   as anteriores.
 
+## Tratando erros por código
+
+Todo erro do engine é um `*tmjlite.TMJLiteError` com um código estável no campo `Code`. Use o código para decidir o que fazer; não é mais preciso procurar texto em inglês na mensagem.
+
+```go
+import (
+    "errors"
+
+    tmjlite "github.com/TMJacometti/tmjlite"
+)
+
+err := db.Execute("INSERT INTO clientes (nome, email) VALUES ('Ana', 'ana@x');")
+switch {
+case errors.Is(err, tmjlite.ErrUniqueViolation):   // 401: e-mail já cadastrado
+case errors.Is(err, tmjlite.CategoryConstraint):   // qualquer 4xx
+case err != nil:
+    return err
+}
+
+db, err := tmjlite.Open("app.tmjp")
+var te *tmjlite.TMJLiteError
+if errors.As(err, &te) {
+    switch te.Code {
+    case tmjlite.ErrLocked:        // outro processo está com o arquivo
+    case tmjlite.ErrNotADatabase:  // o arquivo não é um banco TMJLite
+    }
+    fmt.Println(int(te.Code), te.Code, te.Code.Category())  // 500 LOCKED ACCESS
+}
+
+fmt.Println(tmjlite.ABIVersion())                  // 2
+```
+
+As constantes são `tmjlite.Err` + o nome da tabela abaixo em CamelCase (`UNIQUE_VIOLATION` → `ErrUniqueViolation`), do tipo `ErrorCode`; as categorias são `tmjlite.Category…` (`CategoryConstraint`, `CategoryOpen`…). As duas implementam `error`, então servem de alvo para `errors.Is`, inclusive através de `fmt.Errorf("…: %w", err)`. `err.Error()` continua sendo `tmjlite: <mensagem>`. Um número que o driver ainda não conhece (biblioteca nativa mais nova) aparece como `CODE_<n>` e ainda casa com a categoria. Erros que nascem no driver têm `Code == tmjlite.ErrUnknown` e não casam com nenhum código.
+
+Regras do contrato (valem para o engine, a API C e os seis drivers):
+
+- o **número** de um código nunca muda nem é reaproveitado;
+- códigos novos podem aparecer numa versão futura: para um código que o seu
+  programa não conhece, use a **categoria** (a centena do número) ou trate
+  como erro genérico;
+- a **mensagem** continua existindo e continua igual, mas é texto para gente,
+  não contrato: não procure trechos dela no seu código.
+
+**Biblioteca nativa antiga.** Os símbolos de código são resolvidos em tempo de execução (`dlsym` / `GetProcAddress`), não pelo linker: um binário compilado com este driver ainda carrega uma `libtmjlite_ffi` anterior aos códigos (ABI 1), e nesse caso `Code` vale `tmjlite.ErrUnknown` (-1). `tmjlite.ABIVersion()` diz qual ABI foi carregada. No Linux o driver passa a ligar com `-ldl` (necessário só em glibc antiga).
+
+| Código | Nome | Categoria | Quando |
+|---:|---|---|---|
+| 1 | `ERROR` | GENERIC | Erro sem classificação mais específica |
+| 100 | `SYNTAX` | SQL | SQL que o parser não aceita |
+| 101 | `SEMANTIC` | SQL | SQL bem formado, mas a consulta é inválida (GROUP BY, ORDER BY fora do SELECT, número de valores, subconsulta com mais de uma linha) |
+| 200 | `SCHEMA` | SCHEMA | DDL inválido ou objeto em estado que não permite a operação |
+| 201 | `NO_SUCH_TABLE` | SCHEMA | Tabela não existe |
+| 202 | `NO_SUCH_COLUMN` | SCHEMA | Coluna não existe |
+| 203 | `NO_SUCH_INDEX` | SCHEMA | Índice não existe |
+| 204 | `TABLE_EXISTS` | SCHEMA | Tabela já existe |
+| 205 | `COLUMN_EXISTS` | SCHEMA | Coluna já existe |
+| 206 | `INDEX_EXISTS` | SCHEMA | Índice já existe (pelo nome ou pelas colunas) |
+| 207 | `AMBIGUOUS_COLUMN` | SCHEMA | Coluna ambígua: qualifique com tabela ou alias |
+| 300 | `TYPE_MISMATCH` | TYPE | Valor de um tipo que a coluna não aceita |
+| 301 | `INVALID_VALUE` | TYPE | Tipo certo, valor inaceitável (maior que STRING(n), data inválida, byte NUL) |
+| 400 | `CONSTRAINT` | CONSTRAINT | Violação de restrição sem código mais específico |
+| 401 | `UNIQUE_VIOLATION` | CONSTRAINT | Chave duplicada em índice UNIQUE |
+| 402 | `PRIMARY_KEY_VIOLATION` | CONSTRAINT | Tentativa de definir ou alterar a PK (ela é gerada pelo engine) |
+| 403 | `NOT_NULL_VIOLATION` | CONSTRAINT | NULL em coluna NOT NULL |
+| 404 | `FOREIGN_KEY_VIOLATION` | CONSTRAINT | Chave estrangeira sem pai, ou pai ainda referenciado |
+| 500 | `LOCKED` | ACCESS | Arquivo travado por outro processo |
+| 501 | `BUSY` | ACCESS | A operação precisa de acesso exclusivo indisponível agora (ex.: VACUUM em conexão shared) |
+| 502 | `READ_ONLY` | ACCESS | Escrita em conexão, snapshot ou mídia só de leitura |
+| 600 | `CANNOT_OPEN` | OPEN | Não foi possível abrir (motivo fora dos códigos abaixo) |
+| 601 | `FILE_NOT_FOUND` | OPEN | Arquivo ou diretório não existe |
+| 602 | `PERMISSION_DENIED` | OPEN | Permissão negada pelo sistema operacional |
+| 603 | `NOT_A_DATABASE` | OPEN | O arquivo existe mas não é um banco TMJLite |
+| 604 | `UNSUPPORTED_FORMAT` | OPEN | Arquivo TMJLite de versão/formato que esta biblioteca não lê |
+| 605 | `FILE_EXISTS` | OPEN | O arquivo já existe |
+| 700 | `CORRUPT` | CORRUPT | Estrutura em disco inválida |
+| 701 | `CORRUPT_CHECKSUM` | CORRUPT | Checksum de página ou de arquivo não confere |
+| 702 | `CORRUPT_WAL` | CORRUPT | WAL inválido, incompleto ou incoerente com o arquivo principal |
+| 800 | `IO` | IO | Falha de leitura/escrita/armazenamento sem código mais específico |
+| 801 | `IO_FSYNC` | IO | fsync falhou: a durabilidade não está garantida |
+| 802 | `DISK_FULL` | IO | Disco cheio ou cota excedida |
+| 900 | `TRANSACTION` | TRANSACTION | Erro de estado de transação sem código mais específico |
+| 901 | `NO_ACTIVE_TRANSACTION` | TRANSACTION | COMMIT/ROLLBACK sem transação ativa |
+| 902 | `TRANSACTION_ACTIVE` | TRANSACTION | Já existe transação ativa (BEGIN aninhado, VACUUM dentro de transação) |
+| 903 | `TRANSACTION_ABORTED` | TRANSACTION | A recuperação de uma transação falhou: feche e reabra o banco |
+| 1000 | `MERGE` | MERGE | Erro de sessão shadow/merge sem código mais específico |
+| 1001 | `MERGE_CONFLICT` | MERGE | Conflito de merge |
+| 1002 | `SCHEMA_DIVERGENCE` | MERGE | O shadow foi gravado contra um esquema diferente do atual |
+| 1003 | `NO_SUCH_BRANCH` | MERGE | Branch não existe |
+| 1004 | `BRANCH_EXISTS` | MERGE | Branch já existe |
+| 1005 | `UNSEALED_OPS` | MERGE | Há operações não seladas no branch |
+| 1100 | `LIMIT_EXCEEDED` | LIMIT | Limite do engine excedido (tamanho de chave, LIMIT grande demais) |
+| 1101 | `NESTING_TOO_DEEP` | LIMIT | Parênteses/subconsultas aninhados além do limite |
+| 1200 | `UNSUPPORTED` | UNSUPPORTED | Recurso não suportado |
+| 1201 | `MULTIPLE_STATEMENTS` | UNSUPPORTED | Mais de uma instrução na mesma chamada |
+| 1300 | `MISUSE` | MISUSE | Uso incorreto da API (argumento inválido, statement nulo, cursor sobre algo que não é SELECT) |
+| 1301 | `PARAM_COUNT` | MISUSE | Número de parâmetros diferente do número de ? |
+| 1400 | `INTERNAL` | INTERNAL | Erro interno (invariante quebrada ou panic capturado): bug do TMJLite |
+
+`405` está reservado para `CHECK`. A lista vale como contrato e está também no
+manual (`docs/EndUserManual.md`, "Códigos de erro") e no header `tmjlite.h`
+(`TMJLITE_ERR_*`).
+
 ## ShadowConnection e branches — escrita multi-processo por merge (git-merge)
 
 ```go
