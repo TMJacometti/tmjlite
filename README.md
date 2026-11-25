@@ -77,5 +77,5 @@ directives already point at `${SRCDIR}/lib`. See [HOWTO-GO.md](HOWTO-GO.md).
 MIT License · TMJ Sistemas de Informação · <https://www.tmjsistemas.com.br>
 
 <!-- tmjlite:test-report:start (gerado pelo CI do TMJLite; não edite entre os marcadores) -->
-**Testes da versão 0.6.0:** aprovado — 830 passaram, 0 falharam, 6 ignorados em 9 suítes · [relatório completo](https://github.com/TMJacometti/tmjlite/releases/download/v0.6.0/TEST-REPORT.md) · [versões anteriores](TEST-REPORTS.md)
+**Testes da versão 0.6.2:** aprovado — 832 passaram, 0 falharam, 6 ignorados em 9 suítes · [relatório completo](https://github.com/TMJacometti/tmjlite/releases/download/v0.6.2/TEST-REPORT.md) · [versões anteriores](TEST-REPORTS.md)
 <!-- tmjlite:test-report:end -->
