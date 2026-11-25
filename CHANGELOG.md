@@ -11,6 +11,78 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-24
+
+### Corrigido
+- **Texto depois do statement não é mais descartado em silêncio.** O parser
+  parava no fim do primeiro statement e ignorava o resto: `DELETE … LIMIT 1`
+  apagava todas as linhas do `WHERE`, `OFFSET` e `RETURNING` eram ignorados,
+  `UPDATE … FROM` atualizava a tabela inteira e, em `a; b`, só `a` rodava.
+  Agora qualquer coisa depois do statement (e do `;` opcional) é `Parse
+  error`, e nada é executado. Vale para `execute`, `query` e statements
+  preparados, em todos os drivers.
+  - **Muda comportamento:** `OFFSET`, `RETURNING`, `DELETE … LIMIT` e
+    `UPDATE … FROM` passam a dar erro de sintaxe (antes "funcionavam" com
+    resultado errado). Vários statements numa chamada são recusados com
+    `multiple statements not supported` — mande um por chamada. No CLI, um
+    script com dois statements na mesma linha (`INSERT …; INSERT …;`) passa
+    a dar erro: um statement por linha. O Studio já divide o SQL sozinho.
+- **`UPDATE` que viola índice `UNIQUE` não altera mais nada.** A linha era
+  gravada em memória antes da checagem e a chave antiga saía do índice antes
+  de a nova ser testada: o erro voltava, mas tabela e índice ficavam
+  discordando na sessão, e o statement válido seguinte levava as linhas
+  duplicadas ao disco (em transação, o `COMMIT` gravava a parte do `UPDATE`
+  que tinha "passado"). Agora o `UPDATE` inteiro é validado contra o estado
+  final antes de tocar em qualquer linha. O ramo `DO UPDATE` do upsert tinha
+  o mesmo defeito no índice e foi corrigido junto.
+- **Upsert de várias linhas é tudo ou nada.** `INSERT … VALUES (…), (…) ON
+  CONFLICT …` aplica as linhas uma a uma: um erro na segunda (outro índice
+  único, `NOT NULL`, FK) deixava a primeira gravada, e ela ia para o disco no
+  statement válido seguinte ou no `COMMIT`. Agora um erro desfaz tudo o que o
+  statement fez.
+- **Texto com byte NUL (`\0`) é recusado na entrada**, em literal e em
+  parâmetro (INSERT, UPDATE, upsert). O engine gravava o texto inteiro, mas a
+  FFI devolve texto como C string e ele voltava vazio. O erro agora sai na
+  gravação, em todos os drivers (antes só o driver Rust recusava, e só o
+  literal). Dado binário fica para o tipo `BLOB`.
+- **`CREATE INDEX` na mesma transação do `CREATE TABLE`** falhava com `table
+  not found` (o índice ia ao engine na hora, a tabela só no `COMMIT`) e ainda
+  deixava o nome do índice "ocupado" até fechar o banco. Agora funciona, o
+  `ROLLBACK` desfaz os dois, e um `CREATE INDEX` recusado não deixa rastro.
+- **Erro de abertura diz o motivo.** `tmjlite_open*` devolvia NULL sem
+  explicação e os drivers respondiam "em uso por outro processo?" para
+  qualquer falha. Agora a mensagem distingue arquivo travado, arquivo que não
+  é um banco TMJLite, permissão negada e diretório inexistente. Um arquivo de
+  **0 bytes** é aceito como banco novo (permite pré-criar o arquivo com a
+  permissão desejada). FFI: função nova `tmjlite_open_error()` — só adição;
+  os seis drivers passam a usá-la e exigem a lib nativa desta versão.
+- **Arquivo principal vazio com `.pwal` não vira banco novo.** Um `.tmjp` de
+  0 bytes só é inicializado se não houver WAL com dados ao lado. Com WAL
+  completo (banco que nunca passou por checkpoint) o banco é recuperado
+  inteiro; com WAL parcial a abertura é recusada (`does not hold the whole
+  database`) e nada é gravado — antes esse caso abria como um banco sem
+  tabelas e o checkpoint da recuperação gravava por cima.
+- **Texto com NUL já gravado** (banco de versão anterior) volta pela FFI com
+  `U+FFFD` no lugar de cada NUL, em vez de uma string vazia: dá para achar e
+  regravar essas linhas.
+- **Upsert devolve a PK** (`last_pk`): a da linha inserida ou a da linha
+  atualizada, quando o statement afeta uma linha. Vinha sempre vazia.
+
+### Alterado
+- **Arquivos novos nascem com permissão `0600`** (Unix): `.tmjp`, `.pwal`,
+  `.lock`, temporários e os oplogs de shadow/branch (`.tmjv`, `.tmjb`,
+  `.tmjc`; o diretório `.shadows/` nasce `0700`). Antes valia o padrão do sistema
+  (`0644` com a umask usual), legível por outros usuários da máquina. Os
+  auxiliares herdam o modo do `.tmjp` quando ele já existe, e o `VACUUM`
+  preserva o modo. **Arquivos existentes não são alterados**: para fechar um
+  banco antigo, `chmod 600` nele. Para um banco novo mais aberto, crie o
+  arquivo vazio com o modo desejado antes de abrir. Consequência a conhecer:
+  um `.tmjp` de 0 bytes **sem** `.pwal` ao lado abre como banco novo e vazio,
+  sem aviso — se um arquivo que tinha dados aparecer com 0 bytes (disco,
+  cópia interrompida), restaure o backup antes de abrir. O `.lock` vazio continua
+  ao lado do banco depois de fechar: apagá-lo abriria uma corrida entre
+  processos com versões diferentes do engine.
+
 ## [0.5.0] - 2026-11-23
 
 ### Adicionado
@@ -676,7 +748,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.9...v0.4.0
 [0.3.9]: https://github.com/TMJacometti/TMJPlatform/compare/v0.3.8...v0.3.9

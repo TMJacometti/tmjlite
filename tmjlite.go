@@ -7,6 +7,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -187,15 +188,29 @@ func errFromDB(db *C.TmjDb) error {
 	return &TMJLiteError{Message: C.GoString(msg)}
 }
 
+// openFailure builds the error for a failed open with the reason the engine
+// gave (locked by another process, not a TMJLite database, permission denied,
+// missing directory...). Call it on the same OS thread as the failed open.
+func openFailure(what string) *TMJLiteError {
+	if reason := C.tmjlite_open_error(); reason != nil {
+		return &TMJLiteError{Message: what + ": " + C.GoString(reason)}
+	}
+	return &TMJLiteError{Message: what}
+}
+
 // Open opens a file-backed database at the given path.
 // The file is created if it does not exist.
 func Open(path string) (*Connection, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
+	// O motivo da falha fica guardado por thread do SO: a goroutine não
+	// pode trocar de thread entre abrir e ler o erro.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	db := C.tmjlite_open(cPath)
 	if db == nil {
-		return nil, &TMJLiteError{Message: "failed to open database: " + path}
+		return nil, openFailure("failed to open database: " + path)
 	}
 	return &Connection{db: db}, nil
 }
@@ -365,9 +380,11 @@ func OpenShared(path string) (*SharedConnection, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	db := C.tmjlite_open_shared(cPath)
 	if db == nil {
-		return nil, &TMJLiteError{Message: "failed to open database: " + path + " (locked by another process?)"}
+		return nil, openFailure("failed to open database: " + path)
 	}
 	return &SharedConnection{db: db}, nil
 }
@@ -468,9 +485,11 @@ type ShadowConnection struct {
 func OpenShadow(path string) (*ShadowConnection, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	db := C.tmjlite_shadow_open(cPath)
 	if db == nil {
-		return nil, &TMJLiteError{Message: "failed to open shadow session on: " + path}
+		return nil, openFailure("failed to open shadow session on: " + path)
 	}
 	return &ShadowConnection{db: db}, nil
 }
@@ -481,9 +500,11 @@ func OpenBranch(path, name string) (*ShadowConnection, error) {
 	defer C.free(unsafe.Pointer(cPath))
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	db := C.tmjlite_shadow_open_branch(cPath, cName)
 	if db == nil {
-		return nil, &TMJLiteError{Message: "failed to open branch '" + name + "' on: " + path}
+		return nil, openFailure("failed to open branch '" + name + "' on: " + path)
 	}
 	return &ShadowConnection{db: db}, nil
 }

@@ -176,6 +176,54 @@ db.SetSnapshotCachePages(512)            // cache por cursor/query (páginas de 
 fsyncs, commits, _ := db.GroupCommitStats() // razão < 1 = group commit coalescendo escritores
 ```
 
+### Tipos, chaves estrangeiras e VACUUM (0.5.0+)
+
+- **Os valores voltam com o tipo da coluna.** `'007'` numa coluna `TEXT` volta
+  texto (antes virava o número `7`) e `SUM` de coluna `INT` volta inteiro. Quem
+  dependia da conversão implícita de texto para número passa a converter no código.
+- **Chaves estrangeiras**: `cliente TEXT REFERENCES clientes ON DELETE CASCADE`
+  (ou `RESTRICT` / `SET NULL`). INSERT e UPDATE no filho exigem o pai; crie um
+  índice na coluna da FK para o `DELETE` do pai não varrer a tabela filha.
+- **`VACUUM;`** compacta o arquivo (ele nunca encolhia sozinho). Exige a
+  conexão clássica, exclusiva, fora de transação.
+- **Apelido de coluna**: `SELECT COUNT(*) AS total FROM clientes;`.
+- **Formato de arquivo v3**: o `.tmjp` é atualizado sozinho na primeira
+  abertura e versões ≤ 0.4.0 deixam de abri-lo. Atualize CLI, drivers e Studio juntos.
+
+### Erro de abertura com o motivo, um statement por chamada, PK do upsert (0.5.1+)
+
+```go
+db, err := tmjlite.OpenShared("app.tmjp")
+if err != nil {
+    return err // ...: database 'app.tmjp' is locked by another process
+               // ...: 'app.tmjp' is not a TMJLite database (unrecognized file format)
+}
+
+r, err := db.Exec("INSERT INTO clientes (nome, email) VALUES ('Ana', 'ana@x') " +
+    "ON CONFLICT (email) DO UPDATE SET nome = excluded.nome;")
+fmt.Println(r.RowsAffected, r.LastPk) // 1 <uuid da linha inserida OU atualizada>
+```
+
+- **Abertura**: o erro traz o motivo real (travado por outro processo, não é
+  um banco TMJLite, permissão negada, diretório inexistente). Antes toda falha
+  parecia "em uso por outro processo". Um arquivo de 0 bytes é aceito como
+  banco novo.
+- **Upsert devolve a PK** em `LastPk`, tanto quando insere quanto quando atualiza
+  (uma linha; em lote de várias linhas continua vazio, como no INSERT).
+- **Um statement por chamada.** `a; b` numa chamada só é erro (antes só `a`
+  rodava, em silêncio). Texto sobrando depois do statement também:
+  `OFFSET`, `RETURNING`, `DELETE … LIMIT` e `UPDATE … FROM` ainda não existem
+  e agora dão erro de sintaxe em vez de serem ignorados.
+- **`UPDATE` que viola um índice `UNIQUE`** falha sem alterar nenhuma linha.
+- **Texto com byte NUL** (`\0`) é recusado, em literal e em parâmetro.
+- **Permissões (Unix)**: arquivos novos nascem `0600`; os auxiliares (`.pwal`,
+  `.lock`) herdam o modo do `.tmjp` que já existe. Para um banco mais aberto,
+  crie o arquivo vazio com o modo desejado antes de abrir. Um banco criado
+  por versão anterior mantém a permissão que tinha: `chmod 600` nele uma vez.
+  O `.lock` vazio ao lado do banco é esperado e fica depois de fechar.
+- **Upsert de várias linhas** é tudo ou nada: um erro em qualquer linha desfaz
+  as anteriores.
+
 ## ShadowConnection e branches — escrita multi-processo por merge (git-merge)
 
 ```go

@@ -30,8 +30,16 @@ typedef struct TmjResult TmjResult;
 
 /* ---- Lifecycle ---- */
 
-/* Open a database file. Creates the file if it doesn't exist. */
+/* Open a database file. Creates the file if it doesn't exist (a 0-byte file
+ * counts as a new database). Returns NULL on failure — call
+ * tmjlite_open_error() for the reason. */
 TmjDb *tmjlite_open(const char *path);
+
+/* Why the last tmjlite_open* / tmjlite_shadow_open* call on THIS thread
+ * returned NULL: locked by another process, not a TMJLite database,
+ * permission denied, missing directory... NULL if that open succeeded.
+ * The pointer is valid until the next open call on the same thread. (0.5.1+) */
+const char *tmjlite_open_error(void);
 
 /* Create an in-memory database (no file, data lost on close). */
 TmjDb *tmjlite_open_memory(void);
