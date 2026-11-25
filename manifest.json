@@ -1,7 +1,7 @@
 {
-  "version": "0.5.1",
+  "version": "0.6.0",
   "codename": "capivara",
-  "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/v0.5.1",
+  "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/v0.6.0",
   "platforms": [
     {
       "id": "macos-arm64",
@@ -155,5 +155,17 @@
         "url": "https://crates.io/crates/tmjlite"
       }
     }
-  ]
+  ],
+  "testReport": {
+    "version": "0.6.0",
+    "status": "passed",
+    "passed": 830,
+    "failed": 0,
+    "ignored": 6,
+    "suites": 9,
+    "failedSuites": [],
+    "date": "2026-11-25T13:18:06Z",
+    "url": "https://github.com/TMJacometti/tmjlite/releases/download/v0.6.0/TEST-REPORT.md",
+    "json": "https://github.com/TMJacometti/tmjlite/releases/download/v0.6.0/test-report.json"
+  }
 }
