@@ -11,6 +11,45 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-25
+
+> **Sobre a 0.6.1:** a tag `v0.6.1` foi criada por engano num commit da
+> 0.6.0. O que saiu com esse número (release do GitHub, pacote NuGet) tem o
+> código da 0.6.0, sem nada do que está listado abaixo. Use a 0.6.2.
+
+### Adicionado
+- **Repositório apt para Debian e Ubuntu:** `sudo apt install tmjlite
+  tmjstudio`, com atualização pelo `apt upgrade`. Os índices são assinados; a
+  página <https://tmjacometti.github.io/apt> traz os dois comandos de
+  configuração. O pacote `tmjstudio` substitui o antigo `tmj-studio`, que
+  deixava o app duplicado no menu.
+- **TMJStudio pelo Homebrew no macOS:**
+  `brew install --cask tmjacometti/tap/tmjstudio` (e `brew upgrade --cask
+  tmjstudio` para atualizar), Apple Silicon e Intel. O cask é publicado junto
+  com o espelho da release do Studio.
+
+### Alterado
+- **`ALTER TABLE` não carrega mais a tabela para a memória.** `ADD`, `DROP` e
+  `MODIFY COLUMN` conferem as linhas numa passada de leitura e as reescrevem
+  em pedaços; `ADD FOREIGN KEY` confere as referências pelo índice de PK do
+  pai. A memória usada é a de um pedaço (4096 linhas), não a da tabela, e os
+  rowids não mudam mais.
+
+### Corrigido
+- **TMJStudio no Linux: instalar por cima de uma versão antiga duplicava o app
+  no menu e os dois abriam a versão velha.** O pacote trazia um atalho com
+  `Exec=tmjstudio`, que abre o primeiro `tmjstudio` do `PATH`. O `.tar.gz`
+  agora traz um `install.sh`: copia o binário para `~/.local/bin`, grava o
+  atalho com o caminho completo, remove atalhos antigos e, se achar uma
+  versão antiga instalada no sistema (o `.deb` `tmj-studio`), pergunta se
+  pode desinstalar. `./install.sh --uninstall` desfaz.
+- **O CLI 0.6.0 (e o 0.6.1) abria dizendo "TMJLite 0.5 - Capivara"** (o `--version` estava
+  certo). O texto da abertura agora sai da versão do pacote, e o manual volta
+  a mostrar a versão corrente.
+- **`DROP COLUMN` de coluna indexada deixava o índice no catálogo** apontando
+  para a posição de outra coluna. Agora os índices que usam a coluna saem
+  junto com ela.
+
 ## [0.6.0] - 2026-11-25
 
 ### Adicionado
@@ -884,7 +923,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/TMJacometti/TMJPlatform/compare/v0.6.0...v0.6.2
 [0.6.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.4.0...v0.5.0
