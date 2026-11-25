@@ -44,37 +44,37 @@
     "prefix": "tmjlite-cli"
   },
   "studio": {
-    "version": "0.6.2",
+    "version": "0.6.3",
     "prefix": "tmjstudio",
     "desc": "IDE nativa para TMJLite, 100% Rust: explorer, editor SQL com autocomplete e abas, grid editável, EXPLAIN, mock data, índices, import CSV e export CSV/JSON. Painel git-native: branches, commit, log e merge com conflitos lado a lado.",
     "note": "macOS: assinado com Developer ID e notarizado pela Apple — abre sem avisos.",
     "files": {
       "linux-x64": [
         {
-          "file": "TMJStudio_0.6.2_linux-x64.tar.gz",
+          "file": "TMJStudio_0.6.3_linux-x64.tar.gz",
           "label": "↓ .tar.gz"
         }
       ],
       "macos-arm64": [
         {
-          "file": "TMJStudio_0.6.2_macos-arm64.dmg",
+          "file": "TMJStudio_0.6.3_macos-arm64.dmg",
           "label": "↓ .dmg (Apple Silicon)"
         }
       ],
       "macos-x64": [
         {
-          "file": "TMJStudio_0.6.2_macos-x64.dmg",
+          "file": "TMJStudio_0.6.3_macos-x64.dmg",
           "label": "↓ .dmg (Intel)"
         }
       ],
       "windows-x64": [
         {
-          "file": "TMJStudio_0.6.2_windows-x64.zip",
+          "file": "TMJStudio_0.6.3_windows-x64.zip",
           "label": "↓ .zip"
         }
       ]
     },
-    "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/studio-v0.6.2"
+    "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/studio-v0.6.3"
   },
   "drivers": [
     {
