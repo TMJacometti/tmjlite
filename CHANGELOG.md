@@ -11,6 +11,26 @@ versão do engine em que saiu.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-25
+
+Só distribuição: nenhuma mudança no engine, no CLI ou nos drivers.
+
+### Adicionado
+- **Publicação do TMJStudio num botão.** O workflow "Publicar Studio" espelha
+  a release validada no repositório público, atualiza o manifest, publica o
+  `tmjstudio` no apt, o cask no Homebrew e a landing. Não há mais passo na
+  máquina de ninguém.
+- **A landing se publica sozinha** no fim de cada release do CLI e de cada
+  publicação do Studio (e por um botão, quando só o conteúdo muda).
+
+### Corrigido
+- **A página de drivers da landing estava parada na 0.3.7.** O guia era
+  gerado por um script que ninguém chamava; agora faz parte do deploy, e a
+  "versão corrente" vem do código.
+- **Token do apt/Homebrew com espaço ou quebra de linha** fazia a publicação
+  falhar com "Malformed input to a URL function". O token é limpo antes de
+  usar, e um valor malformado vira erro claro.
+
 ## [0.6.2] - 2026-11-25
 
 > **Sobre a 0.6.1:** a tag `v0.6.1` foi criada por engano num commit da
@@ -923,7 +943,8 @@ escrita auto-commitada custava ~400 ms num banco de 13 MB.
 - **Crítico:** comparação entre tipos distintos avaliava como igual, e
   `UPDATE`/`DELETE … WHERE id = <uuid>` atingia a tabela inteira.
 
-[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/TMJacometti/TMJPlatform/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/TMJacometti/TMJPlatform/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/TMJacometti/TMJPlatform/compare/v0.6.0...v0.6.2
 [0.6.0]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/TMJacometti/TMJPlatform/compare/v0.5.0...v0.5.1
