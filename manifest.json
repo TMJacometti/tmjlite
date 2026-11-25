@@ -1,7 +1,7 @@
 {
-  "version": "0.5.0",
+  "version": "0.5.1",
   "codename": "capivara",
-  "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/v0.5.0",
+  "basePath": "https://github.com/TMJacometti/tmjlite/releases/download/v0.5.1",
   "platforms": [
     {
       "id": "macos-arm64",
@@ -108,7 +108,7 @@
       "name": "C#",
       "lib": "tmjlite-lib-csharp",
       "prefix": "tmjlite-csharp",
-      "desc": "Instale pelo NuGet: um único TMJLite.dll com o motor nativo embutido para Windows, Linux e macOS (.NET 8+).",
+      "desc": "Instale pelo NuGet: um único TMJLite.dll com o motor nativo embutido para Windows, Linux e macOS (.NET 10+).",
       "code": "using TMJPlatform;\n\nusing var db = TMJLite.ConnectShared(\"app.tmjp\");   // thread-safe, MVCC\nusing var st = db.Prepare(\"INSERT INTO rs (ns, k, samples) VALUES (?, ?, ?) \" +\n                          \"ON CONFLICT (ns, k) DO UPDATE SET samples = excluded.samples;\");\ndb.Transaction(() => { foreach (var it in lote) st.Execute(it.Ns, it.K, it.Samples); });\nusing var cur = db.Cursor(\"SELECT samples FROM rs WHERE ns = ?\", \"ns3\");\nlong total = 0;\nforeach (var row in cur) total += row.GetInt(\"samples\");   // streaming: O(1 linha)",
       "registry": {
         "label": "NuGet",
